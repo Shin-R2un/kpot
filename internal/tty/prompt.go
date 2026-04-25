@@ -1,0 +1,84 @@
+package tty
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"sync"
+
+	"golang.org/x/term"
+)
+
+var (
+	stdinReaderOnce sync.Once
+	stdinReader     *bufio.Reader
+)
+
+// SharedStdin returns a process-wide bufio.Reader bound to os.Stdin.
+// Multiple subsystems (passphrase prompt, REPL) MUST share one reader,
+// otherwise eager bufio buffering in one reader silently swallows lines
+// the next reader expects to see.
+func SharedStdin() *bufio.Reader {
+	stdinReaderOnce.Do(func() {
+		stdinReader = bufio.NewReader(os.Stdin)
+	})
+	return stdinReader
+}
+
+func sharedStdin() *bufio.Reader { return SharedStdin() }
+
+// ReadPassphrase prompts the user for a passphrase with no echo.
+// Falls back to plain stdin reading if the input is not a terminal
+// (useful for tests piping a passphrase). All non-TTY reads go through
+// a single shared bufio.Reader so consecutive prompts don't lose lines
+// to per-call buffering.
+func ReadPassphrase(prompt string) ([]byte, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	defer fmt.Fprintln(os.Stderr)
+
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		if err != nil {
+			return nil, err
+		}
+		return b, nil
+	}
+	line, err := sharedStdin().ReadString('\n')
+	if err != nil && (err != io.EOF || line == "") {
+		return nil, err
+	}
+	return []byte(strings.TrimRight(line, "\r\n")), nil
+}
+
+// ReadNewPassphrase prompts twice and verifies the entries match.
+func ReadNewPassphrase(prompt, confirmPrompt string) ([]byte, error) {
+	first, err := ReadPassphrase(prompt)
+	if err != nil {
+		return nil, err
+	}
+	if len(first) == 0 {
+		return nil, errors.New("passphrase cannot be empty")
+	}
+	second, err := ReadPassphrase(confirmPrompt)
+	if err != nil {
+		return nil, err
+	}
+	if string(first) != string(second) {
+		// Best-effort wipe of the rejected entries before returning.
+		for i := range first {
+			first[i] = 0
+		}
+		for i := range second {
+			second[i] = 0
+		}
+		return nil, errors.New("passphrases do not match")
+	}
+	for i := range second {
+		second[i] = 0
+	}
+	return first, nil
+}
