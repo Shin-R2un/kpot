@@ -99,6 +99,101 @@ func TestNamesSorted(t *testing.T) {
 	}
 }
 
+func TestFind(t *testing.T) {
+	v := New()
+	v.Put("ai/openai", "OPENAI_API_KEY=sk-zzz")
+	v.Put("ai/anthropic", "key=ant-yyy")
+	v.Put("server/fw0", "ssh user@fw0\nopenai is mentioned in body")
+	v.Put("misc/notes", "nothing relevant")
+
+	cases := []struct {
+		query     string
+		wantNames []string
+	}{
+		{"openai", []string{"ai/openai", "server/fw0"}},
+		{"OPENAI", []string{"ai/openai", "server/fw0"}}, // case-insensitive
+		{"ssh", []string{"server/fw0"}},                 // body only
+		{"ai", []string{"ai/anthropic", "ai/openai", "server/fw0"}}, // hits "ai" via name and via "openai" in body
+		{"none-here", nil},
+		{"   ", nil},
+		{"", nil},
+	}
+	for _, c := range cases {
+		got := v.Find(c.query)
+		gotNames := make([]string, len(got))
+		for i, m := range got {
+			gotNames[i] = m.Name
+		}
+		if len(gotNames) != len(c.wantNames) {
+			t.Errorf("Find(%q) names = %v, want %v", c.query, gotNames, c.wantNames)
+			continue
+		}
+		for i := range c.wantNames {
+			if gotNames[i] != c.wantNames[i] {
+				t.Errorf("Find(%q)[%d] = %q, want %q", c.query, i, gotNames[i], c.wantNames[i])
+			}
+		}
+	}
+}
+
+func TestFindFlags(t *testing.T) {
+	v := New()
+	v.Put("openai", "no body match here at all")
+	v.Put("server", "openai mentioned in body")
+
+	matches := v.Find("openai")
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matches))
+	}
+
+	byName := map[string]Match{}
+	for _, m := range matches {
+		byName[m.Name] = m
+	}
+	if !byName["openai"].NameMatch || byName["openai"].BodyMatch {
+		t.Errorf("openai: NameMatch=%v BodyMatch=%v", byName["openai"].NameMatch, byName["openai"].BodyMatch)
+	}
+	if byName["server"].NameMatch || !byName["server"].BodyMatch {
+		t.Errorf("server: NameMatch=%v BodyMatch=%v", byName["server"].NameMatch, byName["server"].BodyMatch)
+	}
+	if byName["server"].Snippet == "" {
+		t.Error("server snippet should be populated for body match")
+	}
+}
+
+func TestTemplateRoundTrip(t *testing.T) {
+	v := New()
+	v.Template = "# {{name}}\nmy custom template\n"
+	v.Put("k", "body")
+
+	b, err := v.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte("template")) {
+		t.Fatalf("template field missing from JSON: %s", b)
+	}
+
+	v2, err := FromJSON(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2.Template != v.Template {
+		t.Fatalf("template = %q, want %q", v2.Template, v.Template)
+	}
+}
+
+func TestTemplateOmittedWhenEmpty(t *testing.T) {
+	v := New()
+	b, err := v.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte("\"template\"")) {
+		t.Fatalf("empty template should be omitted from JSON: %s", b)
+	}
+}
+
 func TestPutOverwrites(t *testing.T) {
 	v := New()
 	v.Put("k", "first")

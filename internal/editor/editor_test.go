@@ -28,6 +28,49 @@ echo "edited content" > "$1"
 	}
 }
 
+func TestPickEditorPrecedence(t *testing.T) {
+	t.Setenv("EDITOR", "env-editor")
+	t.Setenv("VISUAL", "visual-editor")
+
+	t.Run("env wins when Default unset", func(t *testing.T) {
+		Default = ""
+		bin, _, err := pickEditor()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bin != "env-editor" {
+			t.Errorf("bin = %q, want env-editor", bin)
+		}
+	})
+
+	t.Run("Default beats env", func(t *testing.T) {
+		Default = "config-editor --wait"
+		t.Cleanup(func() { Default = "" })
+		bin, args, err := pickEditor()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bin != "config-editor" {
+			t.Errorf("bin = %q, want config-editor", bin)
+		}
+		if len(args) != 1 || args[0] != "--wait" {
+			t.Errorf("args = %v, want [--wait]", args)
+		}
+	})
+
+	t.Run("Default whitespace falls through to env", func(t *testing.T) {
+		Default = "   "
+		t.Cleanup(func() { Default = "" })
+		bin, _, err := pickEditor()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bin != "env-editor" {
+			t.Errorf("bin = %q, want env-editor", bin)
+		}
+	})
+}
+
 func TestSanitize(t *testing.T) {
 	cases := map[string]string{
 		"":             "note",

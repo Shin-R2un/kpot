@@ -13,9 +13,16 @@ import (
 	"golang.org/x/term"
 )
 
+// PassphraseEnv is the environment variable that bypasses the TTY
+// prompt. Useful for scripted/non-interactive runs; printed warning on
+// stderr so users notice when they leave it set in production.
+const PassphraseEnv = "KPOT_PASSPHRASE"
+
 var (
 	stdinReaderOnce sync.Once
 	stdinReader     *bufio.Reader
+
+	envWarnOnce sync.Once
 )
 
 // SharedStdin returns a process-wide bufio.Reader bound to os.Stdin.
@@ -31,12 +38,28 @@ func SharedStdin() *bufio.Reader {
 
 func sharedStdin() *bufio.Reader { return SharedStdin() }
 
+// ResetEnvWarnForTest re-arms the once-per-process warning that fires
+// when KPOT_PASSPHRASE is set. Tests that exercise multiple bypass
+// paths in one binary need this; production code never calls it.
+func ResetEnvWarnForTest() { envWarnOnce = sync.Once{} }
+
 // ReadPassphrase prompts the user for a passphrase with no echo.
 // Falls back to plain stdin reading if the input is not a terminal
 // (useful for tests piping a passphrase). All non-TTY reads go through
 // a single shared bufio.Reader so consecutive prompts don't lose lines
 // to per-call buffering.
+//
+// If the KPOT_PASSPHRASE environment variable is set, its value is
+// returned without prompting (and a one-time warning is printed to
+// stderr so the user knows the bypass is active).
 func ReadPassphrase(prompt string) ([]byte, error) {
+	if env, ok := os.LookupEnv(PassphraseEnv); ok {
+		envWarnOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "warning: "+PassphraseEnv+" is set; bypassing passphrase prompt. Not recommended for production.")
+		})
+		return []byte(env), nil
+	}
+
 	fmt.Fprint(os.Stderr, prompt)
 	defer fmt.Fprintln(os.Stderr)
 

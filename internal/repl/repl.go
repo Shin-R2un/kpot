@@ -1,16 +1,21 @@
 package repl
 
 import (
-	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"golang.org/x/term"
+
+	"github.com/r2un/kpot/internal/clipboard"
 	"github.com/r2un/kpot/internal/crypto"
 	"github.com/r2un/kpot/internal/editor"
+	"github.com/r2un/kpot/internal/notefmt"
 	"github.com/r2un/kpot/internal/store"
 	"github.com/r2un/kpot/internal/tty"
 	"github.com/r2un/kpot/internal/vault"
@@ -22,24 +27,60 @@ type Session struct {
 	Key   []byte
 	Hdr   *vault.Header
 
-	in  *bufio.Reader
-	out io.Writer
-	err io.Writer
+	out  io.Writer
+	err  io.Writer
+	clip *clipboard.Manager
+	p    prompter
 }
 
+// SessionOptions tunes a Session at construction time. All fields are
+// optional — the zero value reproduces v0.1 defaults.
+type SessionOptions struct {
+	// ClipboardTTL overrides the 30s clipboard auto-clear default.
+	// Zero = use the package default.
+	ClipboardTTL time.Duration
+}
+
+// NewSession builds an interactive session. Use NewSessionWith to pass
+// options; this convenience preserves the old call shape so existing
+// tests don't churn.
 func NewSession(path string, v *store.DecryptedVault, key []byte, hdr *vault.Header) *Session {
-	return &Session{
+	return NewSessionWith(path, v, key, hdr, SessionOptions{})
+}
+
+// NewSessionWith builds a session with explicit options (clipboard TTL,
+// future knobs). Defaults match NewSession.
+func NewSessionWith(path string, v *store.DecryptedVault, key []byte, hdr *vault.Header, opts SessionOptions) *Session {
+	s := &Session{
 		Path:  path,
 		Vault: v,
 		Key:   key,
 		Hdr:   hdr,
-		in:    tty.SharedStdin(),
 		out:   os.Stdout,
 		err:   os.Stderr,
+		clip:  newClipboard(opts.ClipboardTTL),
 	}
+	// Default to bufio (works for tests and piped stdin). Run() upgrades
+	// to liner when stdin is a real TTY so users get TAB completion.
+	s.p = newBufioPrompter(tty.SharedStdin(), s.out)
+	return s
+}
+
+// newClipboard wraps Detect with a never-fail Manager. If no backend is
+// available, copy commands return clipboard.ErrUnavailable lazily, so a
+// REPL on a headless box still works for everything else.
+func newClipboard(ttl time.Duration) *clipboard.Manager {
+	cb, _ := clipboard.Detect()
+	return clipboard.NewManager(cb, ttl)
 }
 
 func (s *Session) Close() {
+	if s.p != nil {
+		_ = s.p.Close()
+	}
+	if s.clip != nil {
+		_ = s.clip.Close()
+	}
 	crypto.Zero(s.Key)
 	s.Key = nil
 	s.Vault = nil
@@ -51,15 +92,25 @@ func (s *Session) prompt() string {
 }
 
 func (s *Session) Run() error {
+	// Upgrade to liner only when stdin is a real TTY. Otherwise leave
+	// the bufio prompter in place so piped tests / `<<EOF` heredocs work.
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		_ = s.p.Close()
+		s.p = newLinerPrompter(s.completer())
+	}
+
 	fmt.Fprintf(s.out, "Opened %s (%d notes)\n", s.Path, len(s.Vault.Notes))
 	fmt.Fprintln(s.out, "Type 'help' for commands, 'exit' to quit.")
 	for {
-		fmt.Fprint(s.out, s.prompt())
-		line, err := s.in.ReadString('\n')
+		line, err := s.p.Prompt(s.prompt())
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				fmt.Fprintln(s.out)
 				return nil
+			}
+			if errors.Is(err, errAbort) {
+				// Ctrl-C: discard the in-progress line, keep the REPL alive.
+				continue
 			}
 			return err
 		}
@@ -67,6 +118,7 @@ func (s *Session) Run() error {
 		if line == "" {
 			continue
 		}
+		s.p.AddHistory(line)
 		args := strings.Fields(line)
 		cmd, args := args[0], args[1:]
 
@@ -78,6 +130,27 @@ func (s *Session) Run() error {
 			return nil
 		}
 	}
+}
+
+// completer returns a liner.WordCompleter wired to live note names.
+// Each TAB triggers a fresh Vault.Names() call so adds/deletes show up
+// without restarting the REPL.
+func (s *Session) completer() func(line string, pos int) (string, []string, string) {
+	return func(line string, pos int) (string, []string, string) {
+		return wordComplete(line, pos, func() []string {
+			if s.Vault == nil {
+				return nil
+			}
+			return s.Vault.Names()
+		})
+	}
+}
+
+// Exec runs a single REPL command outside the interactive loop.
+// Returned stop indicates whether the command would terminate the
+// session (only "exit"/"quit" do); single-shot callers can ignore it.
+func (s *Session) Exec(cmd string, args []string) (stop bool, err error) {
+	return s.dispatch(cmd, args)
 }
 
 func (s *Session) dispatch(cmd string, args []string) (stop bool, err error) {
@@ -100,6 +173,47 @@ func (s *Session) dispatch(cmd string, args []string) (stop bool, err error) {
 			return false, errors.New("usage: note <name>")
 		}
 		return false, s.note(args[0])
+	case "rm":
+		yes, rest, err := parseYesFlag(args)
+		if err != nil {
+			return false, err
+		}
+		if len(rest) != 1 {
+			return false, errors.New("usage: rm [-y|--yes] <name>")
+		}
+		return false, s.rm(rest[0], yes)
+	case "find":
+		if len(args) < 1 {
+			return false, errors.New("usage: find <query>")
+		}
+		s.find(strings.Join(args, " "))
+		return false, nil
+	case "copy":
+		if len(args) != 1 {
+			return false, errors.New("usage: copy <name>")
+		}
+		return false, s.copy(args[0])
+	case "template":
+		switch {
+		case len(args) == 0:
+			return false, s.templateEdit()
+		case len(args) == 1 && args[0] == "show":
+			s.templateShow()
+			return false, nil
+		case len(args) == 1 && args[0] == "reset":
+			return false, s.templateReset()
+		default:
+			return false, errors.New("usage: template [show|reset]")
+		}
+	case "passphrase":
+		if len(args) != 0 {
+			return false, errors.New("usage: passphrase")
+		}
+		return false, s.passphrase()
+	case "export":
+		return false, s.export(args)
+	case "import":
+		return false, s.importVault(args)
 	default:
 		return false, fmt.Errorf("unknown command: %s (try 'help')", cmd)
 	}
@@ -110,8 +224,22 @@ func (s *Session) help() {
 	fmt.Fprintln(s.out, "  ls              list note names")
 	fmt.Fprintln(s.out, "  note <name>     create or edit a note in $EDITOR")
 	fmt.Fprintln(s.out, "  read <name>     print a note's body to stdout")
+	fmt.Fprintln(s.out, "  copy <name>     copy a note's body to the clipboard (auto-clears in 30s)")
+	fmt.Fprintln(s.out, "  find <query>    search note names and bodies (case-insensitive)")
+	fmt.Fprintln(s.out, "  rm [-y] <name>  remove a note (asks for confirmation unless -y)")
+	fmt.Fprintln(s.out, "  template        edit the new-note template in $EDITOR")
+	fmt.Fprintln(s.out, "  template show   print the current template")
+	fmt.Fprintln(s.out, "  template reset  restore the built-in default template")
+	fmt.Fprintln(s.out, "  passphrase      rotate this vault's passphrase")
+	fmt.Fprintln(s.out, "  export [-o p] [--force]")
+	fmt.Fprintln(s.out, "                  print decrypted JSON to stdout (or write to a file)")
+	fmt.Fprintln(s.out, "  import <json> [--mode merge|replace] [-y]")
+	fmt.Fprintln(s.out, "                  pull notes from a previously exported JSON")
 	fmt.Fprintln(s.out, "  help            show this help")
 	fmt.Fprintln(s.out, "  exit            close the vault and quit")
+	fmt.Fprintln(s.out)
+	fmt.Fprintf(s.out, "template placeholders (expanded once on new-note create): %s\n",
+		strings.Join(notefmt.SupportedPlaceholders, " "))
 }
 
 func (s *Session) ls() {
@@ -138,28 +266,419 @@ func (s *Session) read(name string) error {
 	return nil
 }
 
+// note opens $EDITOR with a frontmatter (created/updated timestamps)
+// plus either the existing body or, for a brand-new entry, a starter
+// template (id/url/password/api_key/memo). On save the frontmatter is
+// stripped — JSON metadata stays the source of truth — and the result
+// replaces the note. An unmodified template, or a body that's only
+// whitespace once stripped, leaves the vault untouched.
 func (s *Session) note(name string) error {
 	canon, err := store.NormalizeName(name)
 	if err != nil {
 		return err
 	}
-	var initial []byte
+	var (
+		bodyForEditor string
+		created       time.Time
+		updated       time.Time
+		isNew         bool
+	)
 	if existing, ok := s.Vault.Get(canon); ok {
-		initial = []byte(existing.Body)
+		bodyForEditor = existing.Body
+		created = existing.CreatedAt
+		updated = existing.UpdatedAt
+	} else {
+		now := time.Now().UTC()
+		tmpl := s.Vault.Template
+		if tmpl == "" {
+			tmpl = notefmt.DefaultBody
+		}
+		bodyForEditor = notefmt.ApplyPlaceholders(tmpl, notefmt.Placeholders{
+			Name: canon,
+			Now:  now,
+		})
+		created = now
+		updated = now
+		isNew = true
 	}
-	body, err := editor.Edit(initial, canon)
+
+	rendered := notefmt.Render(created, updated, bodyForEditor)
+	edited, err := editor.Edit(rendered, canon)
 	if err != nil {
 		return err
 	}
-	bodyStr := string(body)
-	if strings.TrimSpace(bodyStr) == "" {
+
+	body := notefmt.Strip(edited)
+	if strings.TrimSpace(body) == "" {
 		fmt.Fprintln(s.out, "(empty content; not saved)")
 		return nil
 	}
-	if _, err := s.Vault.Put(canon, bodyStr); err != nil {
+	// Compare against the expanded template so a brand-new note with the
+	// untouched starter is treated as "no edits". For existing notes the
+	// editor body equals existing.Body when nothing changed.
+	if isNew && body == bodyForEditor {
+		fmt.Fprintln(s.out, "(template unchanged; not saved)")
+		return nil
+	}
+
+	if _, err := s.Vault.Put(canon, body); err != nil {
 		return err
 	}
 	return s.persist()
+}
+
+func (s *Session) rm(name string, autoYes bool) error {
+	canon, err := store.NormalizeName(name)
+	if err != nil {
+		return err
+	}
+	if _, ok := s.Vault.Get(canon); !ok {
+		return fmt.Errorf("note %q not found. Try 'ls'", canon)
+	}
+	if !autoYes {
+		ok, err := s.confirm(fmt.Sprintf("remove note %q? [y/N]: ", canon))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(s.out, "cancelled")
+			return nil
+		}
+	}
+	if err := s.Vault.Delete(canon); err != nil {
+		return err
+	}
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "removed %s\n", canon)
+	return nil
+}
+
+// parseYesFlag pulls -y / --yes out of args (in any position) and
+// returns the remaining non-flag arguments. Unknown flags surface as
+// errors so typos don't silently disable confirmations.
+func parseYesFlag(args []string) (yes bool, rest []string, err error) {
+	rest = make([]string, 0, len(args))
+	for _, a := range args {
+		switch a {
+		case "-y", "--yes":
+			yes = true
+		default:
+			if strings.HasPrefix(a, "-") {
+				return false, nil, fmt.Errorf("unknown flag: %s", a)
+			}
+			rest = append(rest, a)
+		}
+	}
+	return yes, rest, nil
+}
+
+func (s *Session) find(query string) {
+	matches := s.Vault.Find(query)
+	if len(matches) == 0 {
+		fmt.Fprintln(s.out, "(no matches)")
+		return
+	}
+	for _, m := range matches {
+		tag := tagFor(m)
+		if m.Snippet != "" {
+			fmt.Fprintf(s.out, "%-32s %s  %s\n", m.Name, tag, m.Snippet)
+		} else {
+			fmt.Fprintf(s.out, "%-32s %s\n", m.Name, tag)
+		}
+	}
+}
+
+func tagFor(m store.Match) string {
+	switch {
+	case m.NameMatch && m.BodyMatch:
+		return "(name+body)"
+	case m.NameMatch:
+		return "(name)"
+	default:
+		return "(body)"
+	}
+}
+
+func (s *Session) copy(name string) error {
+	canon, err := store.NormalizeName(name)
+	if err != nil {
+		return err
+	}
+	n, ok := s.Vault.Get(canon)
+	if !ok {
+		return fmt.Errorf("note %q not found. Try 'ls'", canon)
+	}
+	if err := s.clip.Copy([]byte(n.Body)); err != nil {
+		return fmt.Errorf("clipboard: %w", err)
+	}
+	backend := "clipboard"
+	if b := s.clip.Backend(); b != nil {
+		backend = b.Name()
+	}
+	fmt.Fprintf(s.out, "copied %s via %s (auto-clears in %s)\n", canon, backend, s.clip.ClearAfter())
+	return nil
+}
+
+// passphrase rotates the vault's passphrase. The user is already
+// authenticated (we have s.Key), so we only need to ask for the new
+// passphrase. After Rekey we re-open with the new passphrase to
+// refresh s.Key and s.Hdr — subsequent saves in this session must use
+// the new key, not the stale one.
+func (s *Session) passphrase() error {
+	newPass, err := tty.ReadNewPassphrase("New passphrase: ", "Repeat: ")
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(newPass)
+
+	plaintext, err := s.Vault.ToJSON()
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(plaintext)
+
+	if err := vault.Rekey(s.Path, plaintext, newPass); err != nil {
+		return err
+	}
+
+	_, newKey, newHdr, err := vault.Open(s.Path, newPass)
+	if err != nil {
+		return fmt.Errorf("rekey wrote %s but reopen failed: %w", s.Path, err)
+	}
+	crypto.Zero(s.Key)
+	s.Key = newKey
+	s.Hdr = newHdr
+
+	fmt.Fprintln(s.out, "passphrase changed; previous .bak removed")
+	return nil
+}
+
+// export prints (or writes) the decrypted vault contents as plaintext
+// JSON. Default destination is stdout, with a stderr warning so users
+// notice they just exposed everything. Writing to a file requires
+// --force when the file already exists.
+func (s *Session) export(args []string) error {
+	var (
+		outPath string
+		force   bool
+	)
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-o", "--output":
+			if i+1 >= len(args) {
+				return errors.New("usage: export [-o path] [--force]")
+			}
+			outPath = args[i+1]
+			i++
+		case "-f", "--force":
+			force = true
+		default:
+			return fmt.Errorf("unknown flag: %s", args[i])
+		}
+	}
+
+	plaintext, err := s.Vault.ToJSON()
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(plaintext)
+
+	if outPath == "" {
+		fmt.Fprintln(s.err, "warning: writing decrypted vault contents to stdout")
+		if _, err := s.out.Write(plaintext); err != nil {
+			return err
+		}
+		if !bytes.HasSuffix(plaintext, []byte("\n")) {
+			fmt.Fprintln(s.out)
+		}
+		return nil
+	}
+
+	if _, err := os.Stat(outPath); err == nil && !force {
+		return fmt.Errorf("%s already exists; pass --force to overwrite", outPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fmt.Fprintf(s.err, "warning: writing decrypted vault contents to %s\n", outPath)
+	if err := os.WriteFile(outPath, plaintext, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "exported %d notes to %s\n", len(s.Vault.Notes), outPath)
+	return nil
+}
+
+// importVault loads a JSON vault file (typically produced by export)
+// and merges or replaces the current notes. Replace mode requires
+// confirmation. Merge conflicts are kept under a renamed key with a
+// .conflict-YYYYMMDD[-N] suffix so nothing is lost silently.
+func (s *Session) importVault(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: import <json-file> [--mode merge|replace] [-y]")
+	}
+	inPath := args[0]
+	mode := "merge"
+	yes := false
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--mode":
+			if i+1 >= len(args) {
+				return errors.New("--mode requires merge or replace")
+			}
+			mode = args[i+1]
+			i++
+		case "-y", "--yes":
+			yes = true
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return fmt.Errorf("unknown flag: %s", args[i])
+			}
+			return fmt.Errorf("unexpected argument: %s", args[i])
+		}
+	}
+	if mode != "merge" && mode != "replace" {
+		return fmt.Errorf("--mode must be merge or replace, got %q", mode)
+	}
+
+	raw, err := os.ReadFile(inPath)
+	if err != nil {
+		return err
+	}
+	in, err := store.FromJSON(raw)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", inPath, err)
+	}
+
+	switch mode {
+	case "replace":
+		if !yes {
+			ok, err := s.confirm(fmt.Sprintf("replace ALL %d existing notes with %d imported notes? [y/N]: ", len(s.Vault.Notes), len(in.Notes)))
+			if err != nil {
+				return err
+			}
+			if !ok {
+				fmt.Fprintln(s.out, "cancelled")
+				return nil
+			}
+		}
+		s.Vault.Notes = in.Notes
+		if in.Template != "" {
+			s.Vault.Template = in.Template
+		}
+		fmt.Fprintf(s.out, "replaced: %d notes\n", len(in.Notes))
+	case "merge":
+		added, conflicts := mergeNotes(s.Vault, in)
+		if in.Template != "" && s.Vault.Template == "" {
+			s.Vault.Template = in.Template
+		}
+		fmt.Fprintf(s.out, "merged: +%d new, %d conflicts renamed (.conflict-YYYYMMDD)\n", added, conflicts)
+	}
+	return s.persist()
+}
+
+// mergeNotes copies notes from src into dst. Same-key conflicts are
+// preserved under <name>.conflict-<YYYYMMDD>[-N] so the user can
+// resolve them manually later.
+func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
+	today := time.Now().Format("20060102")
+	for name, n := range src.Notes {
+		if _, exists := dst.Notes[name]; !exists {
+			dst.Notes[name] = n
+			added++
+			continue
+		}
+		base := name + ".conflict-" + today
+		target := base
+		for i := 2; ; i++ {
+			if _, exists := dst.Notes[target]; !exists {
+				break
+			}
+			target = fmt.Sprintf("%s-%d", base, i)
+		}
+		dst.Notes[target] = n
+		conflicts++
+	}
+	return added, conflicts
+}
+
+// templateEdit opens the per-vault new-note template in $EDITOR.
+// Saves replace vault.Template; an empty save is rejected (use
+// `template reset` to restore the default).
+func (s *Session) templateEdit() error {
+	current := s.Vault.Template
+	if current == "" {
+		current = notefmt.DefaultBody
+	}
+	edited, err := editor.Edit([]byte(current), "template")
+	if err != nil {
+		return err
+	}
+	newTmpl := string(edited)
+	if strings.TrimSpace(newTmpl) == "" {
+		return errors.New("template cannot be empty (use 'template reset' to restore the default)")
+	}
+	if newTmpl == s.Vault.Template {
+		fmt.Fprintln(s.out, "(template unchanged; not saved)")
+		return nil
+	}
+	if s.Vault.Template == "" && newTmpl == notefmt.DefaultBody {
+		fmt.Fprintln(s.out, "(matches built-in default; staying unset)")
+		return nil
+	}
+	s.Vault.Template = newTmpl
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintln(s.out, "template saved")
+	return nil
+}
+
+func (s *Session) templateShow() {
+	current := s.Vault.Template
+	source := "vault"
+	if current == "" {
+		current = notefmt.DefaultBody
+		source = "built-in default"
+	}
+	fmt.Fprintf(s.out, "# template (%s)\n", source)
+	fmt.Fprint(s.out, current)
+	if !strings.HasSuffix(current, "\n") {
+		fmt.Fprintln(s.out)
+	}
+	fmt.Fprintf(s.out, "# placeholders: %s\n", strings.Join(notefmt.SupportedPlaceholders, " "))
+}
+
+func (s *Session) templateReset() error {
+	if s.Vault.Template == "" {
+		fmt.Fprintln(s.out, "(already using built-in default)")
+		return nil
+	}
+	s.Vault.Template = ""
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintln(s.out, "template reset to built-in default")
+	return nil
+}
+
+// confirm asks via the active prompter and returns true only on y/yes
+// (case-insensitive). EOF / Ctrl-C default to false so an interrupted
+// prompt is treated as "cancel".
+func (s *Session) confirm(prompt string) (bool, error) {
+	line, err := s.p.Prompt(prompt)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, errAbort) {
+			return false, nil
+		}
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func (s *Session) persist() error {
