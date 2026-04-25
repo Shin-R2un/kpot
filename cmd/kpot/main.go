@@ -273,25 +273,29 @@ func cmdOpenWithRecovery(path string, cfg config.Config) error {
 		return fmt.Errorf("vault %q has no recovery key (created before v0.3?). Use the passphrase: kpot %s", path, path)
 	}
 
-	var (
-		kek []byte
-	)
+	var kek []byte
 	switch hdr.RecoveryWrap.Kind {
 	case vault.WrapKindSeed:
-		mnemonic, err := tty.ReadLine("Recovery seed (space-separated words): ")
+		mnemonic, err := tty.ReadLineSecret("Recovery seed (space-separated words): ")
 		if err != nil {
 			return err
 		}
-		kek, err = recovery.SeedToKEK(mnemonic)
+		defer crypto.Zero(mnemonic)
+		// SeedToKEK takes string because BIP-39 validation requires it;
+		// the conversion produces a string copy that lives until GC.
+		// We still zero `mnemonic` so the user-typed bytes don't linger
+		// any longer than necessary.
+		kek, err = recovery.SeedToKEK(string(mnemonic))
 		if err != nil {
 			return err
 		}
 	case vault.WrapKindSecretKey:
-		raw, err := tty.ReadLine("Recovery secret key: ")
+		raw, err := tty.ReadLineSecret("Recovery secret key: ")
 		if err != nil {
 			return err
 		}
-		key, err := recovery.ParseSecretKey(raw)
+		defer crypto.Zero(raw)
+		key, err := recovery.ParseSecretKey(string(raw))
 		if err != nil {
 			return err
 		}

@@ -395,19 +395,11 @@ func RekeyV2(path string, dek, newPassphrase []byte) error {
 	if err := wrapDEKInto(hdr, pw, pkek, dek); err != nil {
 		return err
 	}
-	// Recovery wrap must also be re-bound to the new AAD (which now
-	// contains the new passphrase wrap). Re-wrap with the existing KEK
-	// is not possible here (we don't have the recovery KEK), so
-	// instead we re-wrap the DEK using the **decoded** wrapped DEK as
-	// pass-through? No — we must regenerate the wrap's AAD-bound
-	// ciphertext. Since the recovery KEK isn't available at rekey
-	// time, we simply re-call wrapDEKInto with… no, we can't.
-	//
-	// Solution: AAD design must NOT include the *other* wrap, so
-	// rotating one wrap doesn't invalidate the other. WrapAAD already
-	// only binds the wrap itself + format + version, so we're fine
-	// here. The payload AAD does include both wraps though, so we
-	// need to re-seal the payload with the new payload AAD.
+	// Recovery wrap is preserved unchanged: WrapAAD only binds a wrap
+	// to format/version/its-own-fields (not to any sibling wrap), so
+	// the recovery wrap's ciphertext stays valid across passphrase
+	// rotation — the recovery KEK is never needed here. The payload
+	// AAD does embed both wraps, so writeWithKey re-seals it below.
 	if err := writeWithKey(path, plaintext, dek, hdr); err != nil {
 		return err
 	}

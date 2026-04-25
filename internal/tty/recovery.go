@@ -28,14 +28,15 @@ func DisplayRecoveryOnce(header, body string) error {
 		return ErrNoTTY
 	}
 
+	// Always go through /dev/tty. We deliberately do NOT fall back to
+	// stderr: in containers / CI / systemd the parent may capture
+	// stderr, and writing the secret there would defeat the whole
+	// "TTY-only" guarantee even though stdin+stdout looked terminal-y.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		// Non-Unix or unusual environment: fall back to stderr but
-		// still require TTY. We checked stdin/stdout above.
-		tty = os.Stderr
-	} else {
-		defer tty.Close()
+		return fmt.Errorf("%w (cannot open /dev/tty: %v)", ErrNoTTY, err)
 	}
+	defer tty.Close()
 
 	fmt.Fprintln(tty)
 	fmt.Fprintln(tty, "════════════════════════════════════════════════════════════════")
@@ -47,15 +48,8 @@ func DisplayRecoveryOnce(header, body string) error {
 	fmt.Fprintln(tty, "────────────────────────────────────────────────────────────────")
 	fmt.Fprint(tty, "書き留めましたか？ ENTER で画面を消去します… ")
 
-	// Read one line directly from /dev/tty — not from the shared
-	// stdin reader, because that may be a pipe.
-	if tty != os.Stderr {
-		buf := make([]byte, 256)
-		_, _ = tty.Read(buf) // best effort; ignore content
-	} else {
-		// Last resort.
-		_, _ = SharedStdin().ReadString('\n')
-	}
+	buf := make([]byte, 256)
+	_, _ = tty.Read(buf) // best effort; we just want the user's ENTER
 	fmt.Fprint(tty, "\033[2J\033[H") // ANSI: clear screen + home cursor
 	return nil
 }
