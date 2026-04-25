@@ -215,6 +215,10 @@ editor = "vim"
 
 # Override the 30-second clipboard auto-clear.
 clipboard_clear_seconds = 60
+
+# OS keychain caching: "auto" (prompt once per vault), "always" (cache
+# silently), or "never" (disabled).
+keychain = "auto"
 ```
 
 Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
@@ -246,9 +250,77 @@ Display safety: `init` refuses to run when stdin or stdout aren't
 real TTYs, and writes the seed to `/dev/tty` (not stdout/stderr) so
 it doesn't leak into shell scrollback, log files, or CI artifacts.
 
-## Out of scope (future PRs)
+## OS keychain caching (v0.4+)
 
-- v0.4: OS keychain caching (macOS Keychain / Linux libsecret / DPAPI)
+By default, the first time you open a vault interactively kpot asks
+whether to cache the per-vault open key in the OS-native secret store.
+On subsequent runs the passphrase prompt and the ~100ms Argon2id
+derivation are both skipped.
+
+```bash
+kpot personal.kpot
+Passphrase: ********
+Cache key in OS keychain so future opens skip the passphrase? [Y/n]: y
+Opened personal.kpot (3 notes)
+kpot:personal>
+
+# Next invocation:
+kpot personal.kpot ls
+ai/openai
+server/fw0
+```
+
+Backends per OS (no third-party Go dependencies — the project shells
+out to system tooling or calls OS APIs directly):
+
+| OS | backend | requirement |
+|---|---|---|
+| macOS | `/usr/bin/security` (Keychain Services) | shipped with macOS |
+| Linux | `secret-tool` (libsecret + GNOME Keyring / KWallet) | `apt install libsecret-tools` (or `dnf install libsecret`); needs a session D-Bus |
+| Windows | `wincred` syscall via `golang.org/x/sys/windows` | shipped with Windows |
+
+Flags & commands:
+
+| invocation | effect |
+|---|---|
+| `kpot <file>` | use cached key if present, else prompt + (interactively) ask to cache |
+| `kpot <file> --no-cache` | skip the cache for this run (still uses passphrase) |
+| `kpot <file> --forget` | drop the cached entry and exit (or precede a single subcommand) |
+| `kpot keychain test` | report which backend is in use and whether it's reachable |
+
+`KPOT_PASSPHRASE` always disables both Get and Set so CI/script runs
+don't accidentally pollute (or leak from) the user's keychain.
+
+The `passphrase` rotation command interacts with the cache version-
+aware:
+
+- v1 vaults: derived key changes → cached entry is invalidated
+- v2 vaults: DEK is preserved across rotations → cached entry stays
+  valid (this is the whole point of the v2 envelope)
+
+Recovery flow (`--recover`) intentionally never touches the cache.
+
+Headless / SSH / container considerations:
+- Linux without `DBUS_SESSION_BUS_ADDRESS` reports `available: false`
+  and falls back to the passphrase prompt every time. No warning
+  unless the config is set to `keychain = "always"`.
+- iCloud Keychain sync on macOS may replicate entries to other Apple
+  devices. If that's not desired, set `keychain = "never"` and rely
+  on the passphrase.
+- Sleep/wake: macOS keychain may auto-lock; Linux/Windows keep entries
+  available for the duration of the login session.
+
+Known limitation — macOS argv exposure:
+- The `Set` path uses `/usr/bin/security add-generic-password -w <hex>`,
+  which means the hex-encoded key briefly appears in the process's
+  command line. macOS Big Sur+ restricts `ps` argv visibility to the
+  same UID, so this matches the same threat boundary as the keychain
+  entry itself (a same-user attacker who can read your keychain can
+  also read your `ps`). Linux uses stdin pipe and Windows uses syscall,
+  so neither is affected. If this matters for your model, set
+  `keychain = "never"` on macOS.
+
+## Out of scope (future PRs)
 - v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,
   `<file>.lock`, optional payload metadata for merge automation. Bytes
   shipping (Git / Drive / USB / Syncthing) is intentionally **not**
@@ -270,6 +342,7 @@ internal/clipboard           cross-platform copy + 30s auto-clear manager
 internal/notefmt             editor frontmatter render/strip, template, placeholders
 internal/config              ~/.config/kpot/config.toml loader (BurntSushi/toml)
 internal/recovery            BIP-39 seed + Crockford-Base32 secret-key encoders, KEK derivation
+internal/keychain            macOS Keychain / Linux secret-tool / Windows wincred (no third-party Go deps)
 internal/tty                 passphrase prompt (no echo, KPOT_PASSPHRASE bypass), TTY-only recovery display
 docs/format.md               on-disk file format spec (v1)
 ```

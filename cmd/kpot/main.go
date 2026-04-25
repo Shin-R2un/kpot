@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/r2un/kpot/internal/config"
 	"github.com/r2un/kpot/internal/crypto"
 	"github.com/r2un/kpot/internal/editor"
+	"github.com/r2un/kpot/internal/keychain"
 	"github.com/r2un/kpot/internal/recovery"
 	"github.com/r2un/kpot/internal/repl"
 	"github.com/r2un/kpot/internal/store"
@@ -24,7 +26,10 @@ Usage:
                                recovery key (default: BIP-39 12-word seed).
   kpot <file>                  Open a vault and enter the REPL
   kpot <file> --recover        Open a vault using its recovery key
+  kpot <file> --no-cache       Open without consulting the OS keychain cache
+  kpot <file> --forget         Remove the cached key and exit (or run a follow-up command without using the cache)
   kpot <file> <command> ...    Run a single command without entering the REPL
+  kpot keychain test           Diagnose the OS keychain backend
   kpot help                    Show this help
   kpot version                 Show the version
 
@@ -49,6 +54,7 @@ Config file:
   ~/.config/kpot/config.toml   optional. Supported keys:
                                  editor                  (overrides $EDITOR)
                                  clipboard_clear_seconds (default: 30)
+                                 keychain                ("auto" | "always" | "never", default: auto)
 
 Recovery model:
   Every vault created with v0.3+ comes with a recovery key (seed phrase
@@ -67,7 +73,7 @@ Examples:
   KPOT_PASSPHRASE=secret kpot personal.kpot copy ai/openai
 `
 
-const version = "0.3.0-dev"
+const version = "0.4.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -96,18 +102,100 @@ func run(args []string) error {
 		return nil
 	case "init":
 		return cmdInit(args[1:])
+	case "keychain":
+		return cmdKeychain(args[1:], cfg)
 	default:
 		path := args[0]
 		rest := args[1:]
-		// `kpot <file> --recover` opens via recovery key.
-		if len(rest) == 1 && rest[0] == "--recover" {
-			return cmdOpenWithRecovery(path, cfg)
+		// Consume leading flags that apply to the whole invocation
+		// regardless of whether REPL or single-shot follows.
+		var (
+			recover bool
+			noCache bool
+			forget  bool
+		)
+		for len(rest) > 0 {
+			switch rest[0] {
+			case "--recover":
+				recover = true
+			case "--no-cache":
+				noCache = true
+			case "--forget":
+				forget = true
+			default:
+				goto done
+			}
+			rest = rest[1:]
+		}
+	done:
+		if recover && (noCache || forget) {
+			return errArgs("--recover cannot be combined with --no-cache or --forget")
+		}
+		if recover {
+			return cmdOpenWithRecovery(path, cfg, rest)
+		}
+		if forget {
+			if err := forgetCachedKey(path); err != nil {
+				return err
+			}
+			noCache = true // also skip Set if a subcommand follows
+			if len(rest) == 0 {
+				fmt.Fprintf(os.Stderr, "forgot cached key for %s\n", path)
+				return nil
+			}
 		}
 		if len(rest) == 0 {
-			return cmdOpen(path, cfg)
+			return cmdOpen(path, cfg, noCache)
 		}
-		return cmdOneShot(path, rest[0], rest[1:], cfg)
+		return cmdOneShot(path, rest[0], rest[1:], cfg, noCache)
 	}
+}
+
+// cmdKeychain dispatches the few keychain-management subcommands that
+// don't require opening a vault.
+func cmdKeychain(args []string, cfg config.Config) error {
+	if len(args) == 0 {
+		return errArgs("usage: kpot keychain test")
+	}
+	switch args[0] {
+	case "test":
+		return cmdKeychainTest(cfg)
+	default:
+		return errArgs(fmt.Sprintf("unknown keychain subcommand: %s", args[0]))
+	}
+}
+
+func cmdKeychainTest(cfg config.Config) error {
+	mode := cfg.KeychainMode()
+	kc := keychain.Default()
+	fmt.Fprintf(os.Stdout, "backend: %s\n", kc.Name())
+	fmt.Fprintf(os.Stdout, "available: %v\n", kc.Available())
+	fmt.Fprintf(os.Stdout, "config mode: %s\n", mode)
+	if !kc.Available() {
+		switch runtime.GOOS {
+		case "linux":
+			fmt.Fprintln(os.Stdout, "hint: install libsecret-tools (apt install libsecret-tools / dnf install libsecret) and ensure DBUS_SESSION_BUS_ADDRESS is set")
+		case "darwin":
+			fmt.Fprintln(os.Stdout, "hint: /usr/bin/security should be present on every macOS install")
+		case "windows":
+			fmt.Fprintln(os.Stdout, "hint: advapi32.dll missing or unreadable")
+		}
+	}
+	return nil
+}
+
+// forgetCachedKey removes any cached entry for path. Quiet on success
+// or "nothing was cached"; only errors on a real backend failure.
+func forgetCachedKey(path string) error {
+	kc := keychain.Default()
+	if !kc.Available() {
+		return nil
+	}
+	account := keychain.CanonicalAccount(path)
+	if err := kc.Delete(account); err != nil && !errors.Is(err, keychain.ErrNotFound) {
+		return fmt.Errorf("forget keychain entry: %w", err)
+	}
+	return nil
 }
 
 // cmdInit creates a new vault. v0.3+ flow: passphrase + always-on
@@ -242,9 +330,10 @@ func generateRecovery(kind string, seedWords int) (display string, kek []byte, e
 	}
 }
 
-// cmdOpen opens path and enters the REPL.
-func cmdOpen(path string, cfg config.Config) error {
-	sess, err := openSession(path, cfg)
+// cmdOpen opens path and enters the REPL. noCache skips both the
+// keychain lookup and the post-open caching prompt for this run.
+func cmdOpen(path string, cfg config.Config, noCache bool) error {
+	sess, err := openSession(path, cfg, noCache)
 	if err != nil {
 		return err
 	}
@@ -254,8 +343,13 @@ func cmdOpen(path string, cfg config.Config) error {
 
 // cmdOpenWithRecovery opens path using a recovery key (seed or secret).
 // The user is prompted for the recovery secret directly — no env-var
-// bypass for this path; it's an emergency-only flow.
-func cmdOpenWithRecovery(path string, cfg config.Config) error {
+// bypass for this path; it's an emergency-only flow. If subcmd is
+// non-empty, runs that single command and exits; otherwise enters REPL.
+//
+// Recovery flow never touches the keychain cache — recovery is rare,
+// and silently caching a key obtained via "I forgot my passphrase"
+// flow would be surprising.
+func cmdOpenWithRecovery(path string, cfg config.Config, subcmd []string) error {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("vault file %q not found", path)
@@ -316,30 +410,30 @@ func cmdOpenWithRecovery(path string, cfg config.Config) error {
 		}
 		return err
 	}
-	defer crypto.Zero(plaintext)
-
-	v, err := store.FromJSON(plaintext)
+	sess, err := buildSession(path, plaintext, dek, hdr, cfg)
 	if err != nil {
-		crypto.Zero(dek)
 		return err
 	}
-	sess := repl.NewSessionWith(path, v, dek, hdr, repl.SessionOptions{
-		ClipboardTTL: cfg.ClipboardTTL(),
-	})
 	defer sess.Close()
 
-	fmt.Fprintln(os.Stderr, "⚠️  Opened via recovery key. Set a new passphrase now: kpot:...> passphrase")
-	return sess.Run()
+	fmt.Fprintln(os.Stderr, "⚠️  Opened via recovery key. Run the `passphrase` command to set a new everyday passphrase.")
+	if len(subcmd) == 0 {
+		return sess.Run()
+	}
+	if _, err := sess.Exec(subcmd[0], subcmd[1:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 // cmdOneShot opens path, runs a single REPL command, and exits.
-func cmdOneShot(path, sub string, args []string, cfg config.Config) error {
+func cmdOneShot(path, sub string, args []string, cfg config.Config, noCache bool) error {
 	// recovery-info doesn't need to open the vault — it only reads the
 	// header. Handle it before we ask for a passphrase.
 	if sub == "recovery-info" {
 		return cmdRecoveryInfo(path)
 	}
-	sess, err := openSession(path, cfg)
+	sess, err := openSession(path, cfg, noCache)
 	if err != nil {
 		return err
 	}
@@ -364,10 +458,20 @@ func cmdRecoveryInfo(path string) error {
 	return nil
 }
 
-// openSession reads the passphrase (TTY or KPOT_PASSPHRASE env),
-// decrypts the vault, and returns a wired-up Session honoring config
-// overrides. Works for both v1 and v2 vaults via vault.Open dispatch.
-func openSession(path string, cfg config.Config) (*repl.Session, error) {
+// openSession unlocks the vault and returns a wired-up Session.
+//
+// Unlock order:
+//  1. If keychain is enabled (cfg.Keychain != "never", noCache == false,
+//     KPOT_PASSPHRASE not set, backend Available) → try cached key.
+//  2. On miss / unavailable → prompt passphrase, derive, open.
+//  3. On success after step 2 → optionally cache the open key.
+//
+// Caching policy by mode:
+//  - "auto"   : prompt "[Y/n]" when running interactively. Skip in
+//               non-interactive runs or when KPOT_PASSPHRASE is set.
+//  - "always" : cache silently when the backend is available.
+//  - "never"  : never read or write the keychain.
+func openSession(path string, cfg config.Config, noCache bool) (*repl.Session, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("vault file %q not found. Use 'kpot init %s' to create it", path, path)
@@ -375,6 +479,32 @@ func openSession(path string, cfg config.Config) (*repl.Session, error) {
 		return nil, err
 	}
 
+	mode := cfg.KeychainMode()
+	// LookupEnv (not Getenv) so KPOT_PASSPHRASE="" is treated the same
+	// way tty.ReadPassphrase treats it: env-set means env-driven, even
+	// if the value happens to be empty. Using "!= ""\" here would
+	// silently disagree with the tty package and re-prompt instead.
+	_, envBypass := os.LookupEnv(tty.PassphraseEnv)
+	useCache := !noCache && !envBypass && mode != config.KeychainNever
+	account := keychain.CanonicalAccount(path)
+
+	// Step 1: try the cached key.
+	if useCache {
+		if cachedKey, err := tryKeychainOpen(account); err == nil {
+			defer crypto.Zero(cachedKey)
+			plaintext, hdr, err := vault.OpenWithKey(path, cachedKey)
+			if err == nil {
+				key := append([]byte(nil), cachedKey...) // session takes ownership
+				return buildSession(path, plaintext, key, hdr, cfg)
+			}
+			// Cached key didn't work (vault was rotated externally,
+			// say): drop it and fall through to passphrase prompt.
+			fmt.Fprintln(os.Stderr, "note: cached key rejected; clearing and re-prompting")
+			_ = forgetCachedKey(path)
+		}
+	}
+
+	// Step 2: passphrase prompt → derive → open.
 	pass, err := tty.ReadPassphrase("Passphrase: ")
 	if err != nil {
 		return nil, err
@@ -388,8 +518,19 @@ func openSession(path string, cfg config.Config) (*repl.Session, error) {
 		}
 		return nil, err
 	}
-	defer crypto.Zero(plaintext)
 
+	// Step 3: cache the freshly-derived key per policy.
+	if useCache {
+		maybeCacheKey(account, key, mode)
+	}
+
+	return buildSession(path, plaintext, key, hdr, cfg)
+}
+
+// buildSession finalises the Session construction. plaintext is zeroed
+// here because store.FromJSON has already consumed it.
+func buildSession(path string, plaintext, key []byte, hdr *vault.Header, cfg config.Config) (*repl.Session, error) {
+	defer crypto.Zero(plaintext)
 	v, err := store.FromJSON(plaintext)
 	if err != nil {
 		crypto.Zero(key)
@@ -397,8 +538,67 @@ func openSession(path string, cfg config.Config) (*repl.Session, error) {
 	}
 	return repl.NewSessionWith(path, v, key, hdr, repl.SessionOptions{
 		ClipboardTTL: cfg.ClipboardTTL(),
+		OnRekey: func(prevVersion int) {
+			// v2 rekey preserves the DEK, so the cached entry is
+			// still valid. Only invalidate after v1 rotations.
+			if prevVersion == 1 {
+				_ = forgetCachedKey(path)
+			}
+		},
 	}), nil
 }
+
+// tryKeychainOpen returns the cached key for account, or an error if
+// no key is cached or the backend is unavailable. Nil error → caller
+// owns the returned slice and must zero it.
+func tryKeychainOpen(account string) ([]byte, error) {
+	kc := keychain.Default()
+	if !kc.Available() {
+		return nil, keychain.ErrUnavailable
+	}
+	return kc.Get(account)
+}
+
+// maybeCacheKey writes key to the keychain per the configured mode.
+// Failures are reported to stderr but never propagate — caching is
+// best-effort, and a failure here shouldn't block the user from
+// using the vault they just successfully unlocked.
+func maybeCacheKey(account string, key []byte, mode string) {
+	kc := keychain.Default()
+	if !kc.Available() {
+		if mode == config.KeychainAlways {
+			fmt.Fprintf(os.Stderr, "note: keychain unavailable (%s); caching skipped\n", kc.Name())
+		}
+		return
+	}
+
+	want := false
+	switch mode {
+	case config.KeychainAlways:
+		want = true
+	case config.KeychainAuto:
+		// Only ask interactively. Non-TTY runs (cron, CI) silently
+		// skip — they shouldn't be writing to the user's keychain.
+		if !tty.IsStdinTTY() {
+			return
+		}
+		ans, err := tty.ReadLine("Cache key in OS keychain so future opens skip the passphrase? [Y/n]: ")
+		if err != nil {
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(ans)) {
+		case "", "y", "yes":
+			want = true
+		}
+	}
+	if !want {
+		return
+	}
+	if err := kc.Set(account, key); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: keychain Set failed: %v\n", err)
+	}
+}
+
 
 type argsError struct{ msg string }
 

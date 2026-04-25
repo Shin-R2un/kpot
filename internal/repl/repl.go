@@ -31,6 +31,7 @@ type Session struct {
 	err  io.Writer
 	clip *clipboard.Manager
 	p    prompter
+	opts SessionOptions
 }
 
 // SessionOptions tunes a Session at construction time. All fields are
@@ -39,6 +40,14 @@ type SessionOptions struct {
 	// ClipboardTTL overrides the 30s clipboard auto-clear default.
 	// Zero = use the package default.
 	ClipboardTTL time.Duration
+
+	// OnRekey, if non-nil, is called after a successful passphrase
+	// rotation with the PREVIOUS vault version (1 or 2). The cmd
+	// layer wires this to keychain invalidation: v1 rekey changes
+	// the payload key (cache becomes stale), v2 rekey preserves the
+	// DEK (cache stays valid). Errors from this callback are
+	// swallowed — caching is best-effort.
+	OnRekey func(prevVersion int)
 }
 
 // NewSession builds an interactive session. Use NewSessionWith to pass
@@ -59,6 +68,7 @@ func NewSessionWith(path string, v *store.DecryptedVault, key []byte, hdr *vault
 		out:   os.Stdout,
 		err:   os.Stderr,
 		clip:  newClipboard(opts.ClipboardTTL),
+		opts:  opts,
 	}
 	// Default to bufio (works for tests and piped stdin). Run() upgrades
 	// to liner when stdin is a real TTY so users get TAB completion.
@@ -422,10 +432,16 @@ func (s *Session) copy(name string) error {
 }
 
 // passphrase rotates the vault's passphrase. The user is already
-// authenticated (we have s.Key), so we only need to ask for the new
-// passphrase. After Rekey we re-open with the new passphrase to
-// refresh s.Key and s.Hdr — subsequent saves in this session must use
-// the new key, not the stale one.
+// authenticated (we have s.Key), so we only ask for the new value.
+//
+// v1 vaults: vault.Rekey re-derives the payload key under a new salt;
+//   the cached key (if any) is now stale → OnRekey hook invalidates it.
+// v2 vaults: vault.RekeyV2 rebuilds only the passphrase wrap; the DEK
+//   and the recovery wrap are preserved → cached DEK stays valid, no
+//   invalidation needed.
+//
+// After rekey we reopen to refresh s.Key/s.Hdr so subsequent saves in
+// this session use the new key, not the stale one.
 func (s *Session) passphrase() error {
 	newPass, err := tty.ReadNewPassphrase("New passphrase: ", "Repeat: ")
 	if err != nil {
@@ -433,14 +449,23 @@ func (s *Session) passphrase() error {
 	}
 	defer crypto.Zero(newPass)
 
-	plaintext, err := s.Vault.ToJSON()
-	if err != nil {
-		return err
-	}
-	defer crypto.Zero(plaintext)
-
-	if err := vault.Rekey(s.Path, plaintext, newPass); err != nil {
-		return err
+	prevVersion := s.Hdr.Version
+	switch prevVersion {
+	case 1:
+		plaintext, err := s.Vault.ToJSON()
+		if err != nil {
+			return err
+		}
+		defer crypto.Zero(plaintext)
+		if err := vault.Rekey(s.Path, plaintext, newPass); err != nil {
+			return err
+		}
+	case 2:
+		if err := vault.RekeyV2(s.Path, s.Key, newPass); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported vault version: %d", prevVersion)
 	}
 
 	_, newKey, newHdr, err := vault.Open(s.Path, newPass)
@@ -450,6 +475,10 @@ func (s *Session) passphrase() error {
 	crypto.Zero(s.Key)
 	s.Key = newKey
 	s.Hdr = newHdr
+
+	if s.opts.OnRekey != nil {
+		s.opts.OnRekey(prevVersion)
+	}
 
 	fmt.Fprintln(s.out, "passphrase changed; previous .bak removed")
 	return nil

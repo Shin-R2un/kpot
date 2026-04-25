@@ -62,6 +62,54 @@ func TestLoadFromRejectsNegativeTTL(t *testing.T) {
 	}
 }
 
+func TestKeychainModeDefaultsAuto(t *testing.T) {
+	cfg := Config{}
+	if cfg.KeychainMode() != KeychainAuto {
+		t.Fatalf("default = %q, want auto", cfg.KeychainMode())
+	}
+}
+
+func TestKeychainModePassesThroughKnownValues(t *testing.T) {
+	for _, v := range []string{KeychainAuto, KeychainAlways, KeychainNever} {
+		cfg := Config{Keychain: v}
+		if got := cfg.KeychainMode(); got != v {
+			t.Errorf("KeychainMode(%q) = %q", v, got)
+		}
+	}
+}
+
+func TestKeychainModeUnknownFallsBackToAuto(t *testing.T) {
+	// User-typoed values that slipped past the loader (loader rejects
+	// them at parse time, but if we set the field directly we should
+	// still be safe).
+	cfg := Config{Keychain: "yes"}
+	if cfg.KeychainMode() != KeychainAuto {
+		t.Fatalf("unknown should fall back to auto, got %q", cfg.KeychainMode())
+	}
+}
+
+func TestLoadFromAcceptsKeychainValues(t *testing.T) {
+	dir := t.TempDir()
+	for _, v := range []string{"auto", "always", "never"} {
+		path := writeTOML(t, dir, `keychain = "`+v+`"`+"\n")
+		cfg, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("keychain=%q: %v", v, err)
+		}
+		if cfg.Keychain != v {
+			t.Errorf("Keychain=%q, want %q", cfg.Keychain, v)
+		}
+	}
+}
+
+func TestLoadFromRejectsBadKeychain(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTOML(t, dir, `keychain = "sometimes"`+"\n")
+	if _, err := LoadFrom(path); err == nil {
+		t.Fatal("expected error for unknown keychain value")
+	}
+}
+
 func TestLoadFromMalformed(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTOML(t, dir, `editor = "unterminated`)

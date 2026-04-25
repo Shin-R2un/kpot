@@ -43,6 +43,15 @@ func sharedStdin() *bufio.Reader { return SharedStdin() }
 // paths in one binary need this; production code never calls it.
 func ResetEnvWarnForTest() { envWarnOnce = sync.Once{} }
 
+// IsStdinTTY reports whether stdin is connected to a real terminal.
+// Wraps golang.org/x/term so callers (cmd/kpot, recovery flows) don't
+// each grow their own implementation with subtly different semantics.
+func IsStdinTTY() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// IsStdoutTTY mirrors IsStdinTTY for stdout. Used by display flows
+// that must refuse to write secrets when the destination is captured.
+func IsStdoutTTY() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+
 // ReadLine prompts on stderr and reads one line of (echoed) input as
 // a string. Use this for non-sensitive input only; sensitive input
 // should go through ReadLineSecret so the caller can zero the buffer.

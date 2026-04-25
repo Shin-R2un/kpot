@@ -34,6 +34,24 @@ func Open(path string, passphrase []byte) (plaintext []byte, key []byte, hdr *He
 	return nil, nil, nil, fmt.Errorf("unhandled version %d", hdr.Version)
 }
 
+// OpenWithKey skips key derivation entirely and decrypts the payload
+// directly with the supplied 32-byte key. The key meaning depends on
+// the vault version: for v1 it's the Argon2id-derived passphrase key,
+// for v2 it's the DEK. The caller (typically the OS keychain cache
+// path) treats the key as opaque — wrong key surfaces as
+// crypto.ErrAuthFailed, same as a passphrase mismatch.
+func OpenWithKey(path string, key []byte) (plaintext []byte, hdr *Header, err error) {
+	hdr, err = readHeader(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	plaintext, err = decryptPayload(hdr, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plaintext, hdr, nil
+}
+
 // OpenWithRecovery opens a v2 vault using a pre-derived recovery KEK
 // (caller derived it from a seed mnemonic or a secret-key — see the
 // recovery package). v1 vaults have no recovery wrap; calling this on
