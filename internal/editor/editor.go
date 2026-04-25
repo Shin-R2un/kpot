@@ -49,7 +49,20 @@ func Edit(initial []byte, hint string) ([]byte, error) {
 	return os.ReadFile(tmpPath)
 }
 
+// Default is the editor command preferred over $EDITOR / $VISUAL when
+// non-empty. Wired from config.Editor in main; tests can set it
+// directly. Splitting on spaces lets values like "code --wait" carry
+// their own arguments.
+var Default string
+
 func pickEditor() (string, []string, error) {
+	// Config-driven default beats env vars: a user who sets editor in
+	// their config file expects it to apply across shells, regardless
+	// of whatever $EDITOR a parent process inherited.
+	if e := strings.TrimSpace(Default); e != "" {
+		fields := strings.Fields(e)
+		return fields[0], fields[1:], nil
+	}
 	if e := strings.TrimSpace(os.Getenv("EDITOR")); e != "" {
 		fields := strings.Fields(e)
 		return fields[0], fields[1:], nil

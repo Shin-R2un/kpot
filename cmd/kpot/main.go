@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/r2un/kpot/internal/config"
 	"github.com/r2un/kpot/internal/crypto"
+	"github.com/r2un/kpot/internal/editor"
 	"github.com/r2un/kpot/internal/repl"
 	"github.com/r2un/kpot/internal/store"
 	"github.com/r2un/kpot/internal/tty"
@@ -15,17 +17,42 @@ import (
 const usage = `kpot - encrypted CLI note vault
 
 Usage:
-  kpot init <file>     Create a new encrypted vault
-  kpot <file>          Open a vault and enter interactive mode
-  kpot help            Show this help
-  kpot version         Show the version
+  kpot init <file>             Create a new encrypted vault
+  kpot <file>                  Open a vault and enter the REPL
+  kpot <file> <command> ...    Run a single command without entering the REPL
+  kpot help                    Show this help
+  kpot version                 Show the version
+
+Single-shot commands (mirror the REPL):
+  ls
+  read <name>
+  note <name>                  (opens $EDITOR)
+  copy <name>
+  find <query...>
+  rm [-y] <name>
+  template [show|reset]
+  passphrase                   rotate this vault's passphrase
+  export [-o path] [--force]   print decrypted JSON to stdout (or write to a file)
+  import <json> [--mode merge|replace] [-y]
+
+Environment:
+  KPOT_PASSPHRASE              if set, used in place of the TTY prompt
+                               (one-time stderr warning)
+
+Config file:
+  ~/.config/kpot/config.toml   optional. Supported keys:
+                                 editor                  (overrides $EDITOR)
+                                 clipboard_clear_seconds (default: 30)
 
 Examples:
   kpot init personal.kpot
   kpot personal.kpot
+  kpot personal.kpot ls
+  kpot personal.kpot read ai/openai
+  KPOT_PASSPHRASE=secret kpot personal.kpot copy ai/openai
 `
 
-const version = "0.1.0-dev"
+const version = "0.2.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -35,6 +62,12 @@ func main() {
 }
 
 func run(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	editor.Default = cfg.Editor
+
 	if len(args) == 0 {
 		fmt.Print(usage)
 		return nil
@@ -52,10 +85,11 @@ func run(args []string) error {
 		}
 		return cmdInit(args[1])
 	default:
-		if len(args) != 1 {
-			return errArgs("usage: kpot <file>")
+		path := args[0]
+		if len(args) == 1 {
+			return cmdOpen(path, cfg)
 		}
-		return cmdOpen(args[0])
+		return cmdOneShot(path, args[1], args[2:], cfg)
 	}
 }
 
@@ -93,37 +127,65 @@ func cmdInit(path string) error {
 	return nil
 }
 
-func cmdOpen(path string) error {
+// cmdOpen opens path and enters the REPL.
+func cmdOpen(path string, cfg config.Config) error {
+	sess, err := openSession(path, cfg)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	return sess.Run()
+}
+
+// cmdOneShot opens path, runs a single REPL command, and exits.
+// Persistent commands (note / rm / template / passphrase / import) save
+// inside their handler; we don't need to do anything extra here.
+func cmdOneShot(path, sub string, args []string, cfg config.Config) error {
+	sess, err := openSession(path, cfg)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	if _, err := sess.Exec(sub, args); err != nil {
+		return err
+	}
+	return nil
+}
+
+// openSession is the shared open path used by both REPL and one-shot
+// modes. It reads the passphrase (TTY or KPOT_PASSPHRASE env), decrypts
+// the vault, and returns a wired-up Session honoring config overrides.
+func openSession(path string, cfg config.Config) (*repl.Session, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("vault file %q not found. Use 'kpot init %s' to create it", path, path)
+			return nil, fmt.Errorf("vault file %q not found. Use 'kpot init %s' to create it", path, path)
 		}
-		return err
+		return nil, err
 	}
 
 	pass, err := tty.ReadPassphrase("Passphrase: ")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer crypto.Zero(pass)
 
 	plaintext, key, hdr, err := vault.Open(path, pass)
 	if err != nil {
 		if errors.Is(err, crypto.ErrAuthFailed) {
-			return errAuth("Wrong passphrase, or the file is corrupted")
+			return nil, errAuth("Wrong passphrase, or the file is corrupted")
 		}
-		return err
+		return nil, err
 	}
 	defer crypto.Zero(plaintext)
 
 	v, err := store.FromJSON(plaintext)
 	if err != nil {
 		crypto.Zero(key)
-		return err
+		return nil, err
 	}
-	sess := repl.NewSession(path, v, key, hdr)
-	defer sess.Close()
-	return sess.Run()
+	return repl.NewSessionWith(path, v, key, hdr, repl.SessionOptions{
+		ClipboardTTL: cfg.ClipboardTTL(),
+	}), nil
 }
 
 type argsError struct{ msg string }

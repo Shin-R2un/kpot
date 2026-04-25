@@ -88,6 +88,45 @@ func Create(path string, passphrase, plaintext []byte) (key []byte, hdr *Header,
 	return key, hdr, nil
 }
 
+// Rekey re-encrypts the vault under newPassphrase. A fresh salt and a
+// new derived key replace the old ones; the file is written atomically
+// (with the same .bak invariant as Save) and then the post-write .bak
+// is removed because it would otherwise still be encrypted with the
+// previous passphrase — defeating the point of the rotation.
+func Rekey(path string, plaintext, newPassphrase []byte) error {
+	salt, err := crypto.NewSalt()
+	if err != nil {
+		return err
+	}
+	params := crypto.DefaultArgon2idParams()
+	key := crypto.DeriveKey(newPassphrase, salt, params)
+	defer crypto.Zero(key)
+
+	hdr := &Header{
+		Format:  FormatName,
+		Version: FormatVersion,
+		KDF: KDFSection{
+			Name:   "argon2id",
+			Salt:   base64.StdEncoding.EncodeToString(salt),
+			Params: params,
+		},
+		Cipher: CipherSection{
+			Name: "xchacha20-poly1305",
+		},
+	}
+	if err := writeWithKey(path, plaintext, key, hdr); err != nil {
+		return err
+	}
+
+	// Wipe the just-created .bak — it still holds OLD-passphrase
+	// ciphertext and would otherwise be a leak surface for the very
+	// passphrase the user is rotating away from.
+	if err := os.Remove(path + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("rekey wrote %s but failed to remove stale .bak: %w", path, err)
+	}
+	return nil
+}
+
 // Save re-encrypts plaintext with the existing key and KDF section,
 // generating a fresh nonce, and atomically replaces the vault file.
 // The previous file is preserved as <path>.bak.

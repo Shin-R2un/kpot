@@ -1,18 +1,28 @@
 # kpot
 
-`kpot` (= **k**ey **pot**) is an encrypted CLI note vault. One vault is one
-file. APIs keys, passwords, SSH info, secret memos all live as
-plain‑text **notes** inside an authenticated‑encrypted blob.
+`kpot` (= **k**ey **pot**) is an encrypted CLI note vault. One vault is
+one file: API keys, passwords, SSH info, and free-form secret memos all
+live as plain-text **notes** inside an authenticated-encrypted blob.
 
-This is the first PR (MVP scope). The full design lives in
+Pitch: SQLite-style "1 file = 1 vault" portability, plus a friendly
+REPL with `$EDITOR` integration. No daemon, no server, no SaaS.
+
+The full design lives in
 `/home/shin/.claude/plans/kpot-cli-cuddly-patterson.md`.
 
 ## Build
 
 ```bash
-make build      # produces ./kpot
-make test
+make build      # → ./kpot
+make test       # → go test ./...
 make install    # → $(go env GOPATH)/bin/kpot
+```
+
+If `~/go/bin` isn't on your `PATH`, build directly into a directory
+that is:
+
+```bash
+go build -o ~/bin/kpot ./cmd/kpot
 ```
 
 Requires Go 1.18+.
@@ -20,33 +30,196 @@ Requires Go 1.18+.
 ## Quick start
 
 ```bash
-kpot init personal.kpot         # creates an empty vault, prompts for a passphrase
-kpot personal.kpot              # opens REPL
+kpot init personal.kpot          # create vault, prompt for passphrase
+kpot personal.kpot               # open REPL
 
-kpot:personal> help
-kpot:personal> note ai/openai   # opens $EDITOR, save to store
-kpot:personal> ls
-kpot:personal> read ai/openai
+kpot:personal> help              # full command list
+kpot:personal> note ai/openai    # create new note (or open existing)
+kpot:personal> ls                # list note names
+kpot:personal> read ai/openai    # print the body to stdout
+kpot:personal> copy ai/openai    # → clipboard, auto-clears (30s default)
+kpot:personal> find openai       # case-insensitive name + body search
+kpot:personal> rm  ai/openai     # asks "remove note 'ai/openai'? [y/N]"
+kpot:personal> template show     # inspect new-note template
+kpot:personal> template          # edit the template in $EDITOR
+kpot:personal> passphrase        # rotate this vault's passphrase
+kpot:personal> export            # print decrypted JSON to stdout
 kpot:personal> exit
 ```
 
-## What MVP does
+Or run a single command without entering the REPL:
 
-- `kpot init <file>` create a new vault
-- `kpot <file>` enter REPL
-- REPL: `ls`, `note <name>`, `read <name>`, `help`, `exit`
-- Note names support `/` (e.g. `ai/openai`, `server/fw0`)
-- Argon2id (64 MiB / 3 / 1) + XChaCha20‑Poly1305 with header‑bound AAD
-- Atomic write + 1‑generation `.bak`
-- Editor temp file in `/dev/shm` (Linux) or OS tmp; wiped + unlinked on close
+```bash
+kpot personal.kpot ls
+kpot personal.kpot read ai/openai
+kpot personal.kpot copy ai/openai
+kpot personal.kpot rm -y ai/openai
+kpot personal.kpot export -o backup.json --force
+kpot personal.kpot import backup.json --mode merge
+```
 
-## Out of scope (next PRs)
+For automation, set `KPOT_PASSPHRASE` to bypass the TTY prompt — kpot
+prints a one-time stderr warning so you notice when it's set:
 
-- `copy`, `find`, `rm`, `edit` shortcut, single‑shot subcommands
-- Passphrase change, seed phrase recovery, OS keychain
-- Git sync, materialize, MCP/agent integration
+```bash
+KPOT_PASSPHRASE='hunter2' kpot personal.kpot ls
+```
 
-See `docs/format.md` for the on‑disk file layout.
+Multi-line paste works as-is: the REPL uses `peterh/liner` which
+honors bracketed-paste mode. For longer content prefer `note <name>`
+(opens `$EDITOR`).
+
+Anywhere in the REPL, **TAB** completes the command at the start of the
+line, or the note name after a command that takes one (`note` / `read` /
+`copy` / `rm`). `template <TAB>` completes to `show` / `reset`.
+`↑` / `↓` walk the in-session history.
+
+## Commands
+
+| command | shape | what it does |
+|---|---|---|
+| `ls` | – | list all note names, sorted |
+| `note <name>` | `<name>` | open `$EDITOR`. Existing → edit; new → seed with template |
+| `read <name>` | `<name>` | print the note body to stdout |
+| `copy <name>` | `<name>` | put body on the clipboard, auto-clear after configured TTL |
+| `find <query>` | free text | case-insensitive substring over name **and** body |
+| `rm [-y] <name>` | flag + name | remove a note (`-y` / `--yes` skips the `[y/N]` prompt) |
+| `template` | – | edit the per-vault new-note template in `$EDITOR` |
+| `template show` | – | print the current template + which source (vault / built-in) |
+| `template reset` | – | drop the per-vault template, fall back to the built-in default |
+| `passphrase` | – | rotate this vault's passphrase (the previous `.bak` is removed so an old-passphrase copy doesn't linger) |
+| `export [-o p] [--force]` | flags | print decrypted JSON to stdout, or write to a file (file write needs `--force` to overwrite) |
+| `import <json> [--mode merge\|replace] [-y]` | path + flags | merge (default) or replace using JSON produced by `export`. Merge conflicts kept under `<name>.conflict-YYYYMMDD[-N]` |
+| `help` / `?` | – | show this list |
+| `exit` / `quit` / `q` / Ctrl-D | – | close the vault and quit |
+
+`Ctrl-C` cancels the in-progress line but keeps the REPL alive.
+
+Note names: lowercase ASCII `[a-z0-9._/-]`, 1..128 chars, no leading/
+trailing `/`, no `//`. Hierarchical names (`ai/openai`, `server/fw0`)
+are encouraged — they make `ls` / `find` / TAB completion easier to
+navigate.
+
+## New-note template & frontmatter
+
+When `note <name>` opens for an entry that doesn't yet exist, `$EDITOR`
+receives a frontmatter block plus a starter template body. Example:
+
+```markdown
+---
+created: 2026-04-25T21:35:12+09:00
+updated: 2026-04-25T21:35:12+09:00
+---
+
+# ai/openai
+
+- id:
+- url:
+- password:
+- api_key:
+
+## memo
+
+```
+
+- The `---` frontmatter is **regenerated each open** from JSON metadata
+  (the source of truth for timestamps) and **stripped on save**. Editing
+  the timestamps in the body has no effect — the displayed values
+  always reflect the current `created_at` / `updated_at`.
+- The starter body is the **template**, customizable per vault:
+  - `template show` — print current template + source
+  - `template` — open in `$EDITOR`; saving stores it inside the vault
+  - `template reset` — clear the override, fall back to the built-in
+- **Placeholders** are expanded once when a new note is created. They
+  do not run on subsequent edits — substituted values become part of
+  the saved body.
+
+  | placeholder | example for `note ai/openai` |
+  |---|---|
+  | `{{name}}` | `ai/openai` |
+  | `{{basename}}` | `openai` |
+  | `{{date}}` | `2026-04-25` |
+  | `{{time}}` | `21:35` |
+  | `{{datetime}}` | `2026-04-25T21:35:12+09:00` |
+
+  Unknown `{{tokens}}` are left untouched, so writing a literal `{{x}}`
+  in the body is safe.
+- Saving an unmodified template (no edits between open and `:wq`) skips
+  the write — kpot prints `(template unchanged; not saved)`.
+
+## Crypto & on-disk layout
+
+- KDF: **Argon2id** (64 MiB / 3 iters / 1 parallelism) → 32-byte key.
+  Parameters stored in the header so a future upgrade can decrypt old
+  vaults.
+- AEAD: **XChaCha20-Poly1305** with a fresh 24-byte nonce per write.
+- AAD binds the header (KDF params, cipher choice) to the ciphertext —
+  any tampering fails authentication with the standard error.
+- Atomic write: `<file>.tmp` → `fsync` → swap with `<file>` → keep prior
+  generation as `<file>.bak`. A crash at any step leaves at least one
+  decryptable file behind.
+- Wrong passphrase and a corrupted file return the **same** error
+  (`Wrong passphrase, or the file is corrupted`) — the binary doesn't
+  leak which one it was.
+
+See `docs/format.md` for the byte-level layout (note: the plaintext
+payload also carries an optional `template` field, omitted when unset).
+
+## Clipboard
+
+`copy <name>` shells out to a platform-specific tool:
+
+| OS | preferred | fallback |
+|---|---|---|
+| Linux | `wl-copy` / `wl-paste` (when `WAYLAND_DISPLAY` is set) | `xclip` → `xsel` |
+| macOS | `pbcopy` / `pbpaste` | – |
+| Windows | PowerShell `Set-Clipboard` / `Get-Clipboard` | – |
+
+After `copy`, kpot waits 30 seconds and clears the clipboard — but
+**only if it still holds what kpot put there**. If you copy something
+else in the meantime, your value is left alone. On REPL exit, any
+still-pending wipe runs synchronously so a secret never outlives the
+session.
+
+If no backend is found, `copy` errors out; everything else still works.
+
+## Editor integration
+
+- `$EDITOR` → fallback to `$VISUAL` → `nano` / `vim` / `vi` / `notepad`.
+- Temp file lives in `/dev/shm` on Linux (tmpfs, never hits disk),
+  otherwise the OS temp dir. Permissions are `0600`.
+- On editor exit (success or failure) the temp file is overwritten with
+  zeros and unlinked.
+
+## Configuration
+
+Optional, lives at `~/.config/kpot/config.toml` (or the platform
+equivalent of `os.UserConfigDir()`). All keys are optional; a missing
+file is fine.
+
+```toml
+# Editor preferred over $EDITOR / $VISUAL (so a personal preference
+# applies regardless of the parent shell).
+editor = "vim"
+
+# Override the 30-second clipboard auto-clear.
+clipboard_clear_seconds = 60
+```
+
+Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
+`vim` / `vi` (or `notepad` on Windows).
+
+## Out of scope (future PRs)
+
+- v0.3: seed-phrase recovery (BIP-39, format v2)
+- v0.4: OS keychain caching (macOS Keychain / Linux libsecret / DPAPI)
+- v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,
+  `<file>.lock`, optional payload metadata for merge automation. Bytes
+  shipping (Git / Drive / USB / Syncthing) is intentionally **not**
+  bundled — pick whichever transport you prefer
+- v0.6: `kpot materialize` (`/run/kpot/<name>.env`)
+- v0.7: TUI mode (bubbletea)
+- v0.8: MCP / agent integration
 
 ## File layout
 
@@ -54,8 +227,12 @@ See `docs/format.md` for the on‑disk file layout.
 cmd/kpot/main.go             argv routing
 internal/crypto              Argon2id + XChaCha20-Poly1305
 internal/vault               .kpot file format, atomic write, .bak
-internal/store               in-memory note CRUD, name normalization
-internal/repl                interactive command loop
+internal/store               in-memory note CRUD, name normalization, search
+internal/repl                interactive command loop, prompter, TAB completion
 internal/editor              $EDITOR launcher, tmpfs temp file
-internal/tty                 passphrase prompt (no echo)
+internal/clipboard           cross-platform copy + 30s auto-clear manager
+internal/notefmt             editor frontmatter render/strip, template, placeholders
+internal/config              ~/.config/kpot/config.toml loader (BurntSushi/toml)
+internal/tty                 passphrase prompt (no echo, KPOT_PASSPHRASE bypass), shared bufio.Reader
+docs/format.md               on-disk file format spec (v1)
 ```

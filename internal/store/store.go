@@ -22,7 +22,11 @@ type DecryptedVault struct {
 	Version   int              `json:"version"`
 	CreatedAt time.Time        `json:"created_at"`
 	UpdatedAt time.Time        `json:"updated_at"`
-	Notes     map[string]*Note `json:"notes"`
+	// Template is the per-vault new-note template body. Empty means
+	// "use the built-in default" — kept omitempty so existing v1 vaults
+	// without this field round-trip cleanly.
+	Template string           `json:"template,omitempty"`
+	Notes    map[string]*Note `json:"notes"`
 }
 
 func New() *DecryptedVault {
@@ -86,6 +90,54 @@ func (v *DecryptedVault) Put(name, body string) (*Note, error) {
 	n := &Note{Body: body, CreatedAt: now, UpdatedAt: now}
 	v.Notes[canon] = n
 	return n, nil
+}
+
+// Match describes a single hit from Find. NameMatch and BodyMatch are
+// independent — a note may match both. Snippet, when populated, is the
+// trimmed first body line containing the query (best-effort).
+type Match struct {
+	Name      string
+	NameMatch bool
+	BodyMatch bool
+	Snippet   string
+}
+
+// Find returns notes whose name or body contains query (case-insensitive
+// substring). Empty query returns no matches. Results are sorted by name.
+func (v *DecryptedVault) Find(query string) []Match {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil
+	}
+	out := make([]Match, 0)
+	for _, name := range v.Names() {
+		n := v.Notes[name]
+		nameMatch := strings.Contains(name, q)
+		body := n.Body
+		bodyMatch := strings.Contains(strings.ToLower(body), q)
+		if !nameMatch && !bodyMatch {
+			continue
+		}
+		m := Match{Name: name, NameMatch: nameMatch, BodyMatch: bodyMatch}
+		if bodyMatch {
+			m.Snippet = firstMatchingLine(body, q)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func firstMatchingLine(body, lowerQuery string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(strings.ToLower(line), lowerQuery) {
+			s := strings.TrimSpace(line)
+			if len(s) > 120 {
+				s = s[:117] + "..."
+			}
+			return s
+		}
+	}
+	return ""
 }
 
 func (v *DecryptedVault) Delete(name string) error {

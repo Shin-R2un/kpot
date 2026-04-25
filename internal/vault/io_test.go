@@ -112,6 +112,71 @@ func TestRefuseOverwrite(t *testing.T) {
 	}
 }
 
+func TestRekeyChangesPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v.kpot")
+	oldPass := []byte("old-pass")
+	newPass := []byte("new-pass")
+	plaintext := []byte(`{"v":1,"notes":{"a":"b"}}`)
+
+	if _, _, err := Create(path, oldPass, plaintext); err != nil {
+		t.Fatal(err)
+	}
+	// Create a save so .bak exists before Rekey runs.
+	pt, key, hdr, err := Open(path, oldPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, pt, key, hdr); err != nil {
+		t.Fatal(err)
+	}
+	crypto.Zero(key)
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("setup: expected .bak after Save, got %v", err)
+	}
+
+	// Rekey should succeed with the original plaintext under newPass.
+	if err := Rekey(path, plaintext, newPass); err != nil {
+		t.Fatal(err)
+	}
+
+	// Old passphrase no longer works.
+	if _, _, _, err := Open(path, oldPass); err != crypto.ErrAuthFailed {
+		t.Fatalf("old passphrase should fail post-rekey, got %v", err)
+	}
+	// New passphrase decrypts the same plaintext.
+	got, key2, _, err := Open(path, newPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.Zero(key2)
+	if !bytes.Equal(got, plaintext) {
+		t.Fatalf("plaintext mismatch after rekey")
+	}
+
+	// .bak must be gone — leaving an old-passphrase backup defeats rekey.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf(".bak should be removed after rekey, got %v", err)
+	}
+}
+
+func TestRekeyMissingBakIsOK(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v.kpot")
+	oldPass := []byte("old")
+	newPass := []byte("new")
+	plaintext := []byte(`{"v":1}`)
+
+	if _, _, err := Create(path, oldPass, plaintext); err != nil {
+		t.Fatal(err)
+	}
+	// No Save → no .bak yet. Rekey should still succeed and not error
+	// on the missing .bak removal step.
+	if err := Rekey(path, plaintext, newPass); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHeaderTamperDetected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v.kpot")
