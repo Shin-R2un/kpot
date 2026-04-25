@@ -43,6 +43,18 @@ func sharedStdin() *bufio.Reader { return SharedStdin() }
 // paths in one binary need this; production code never calls it.
 func ResetEnvWarnForTest() { envWarnOnce = sync.Once{} }
 
+// ReadLine prompts on stderr and reads one line of (echoed) input.
+// Used by recovery flows where the secret should be visible so users
+// catch typos before submitting. For passphrases use ReadPassphrase.
+func ReadLine(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := sharedStdin().ReadString('\n')
+	if err != nil && (err != io.EOF || line == "") {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
 // ReadPassphrase prompts the user for a passphrase with no echo.
 // Falls back to plain stdin reading if the input is not a terminal
 // (useful for tests piping a passphrase). All non-TTY reads go through

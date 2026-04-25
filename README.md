@@ -30,8 +30,13 @@ Requires Go 1.18+.
 ## Quick start
 
 ```bash
-kpot init personal.kpot          # create vault, prompt for passphrase
-kpot personal.kpot               # open REPL
+kpot init personal.kpot          # create vault, prompt for passphrase,
+                                 # and DISPLAY YOUR RECOVERY SEED ONCE.
+                                 # Write it down — there's no reissue.
+
+kpot personal.kpot               # open REPL with passphrase (everyday)
+kpot personal.kpot --recover     # open REPL with the recovery seed
+                                 # (emergency only — then run `passphrase`)
 
 kpot:personal> help              # full command list
 kpot:personal> note ai/openai    # create new note (or open existing)
@@ -65,6 +70,11 @@ prints a one-time stderr warning so you notice when it's set:
 KPOT_PASSPHRASE='hunter2' kpot personal.kpot ls
 ```
 
+Note: `init` always issues a recovery key and refuses to run if stdin/
+stdout aren't real terminals — that's deliberate, so the seed never
+ends up in CI logs or shell scrollback. Run `init` interactively, then
+automate everyday operations after.
+
 Multi-line paste works as-is: the REPL uses `peterh/liner` which
 honors bracketed-paste mode. For longer content prefer `note <name>`
 (opens `$EDITOR`).
@@ -87,7 +97,8 @@ line, or the note name after a command that takes one (`note` / `read` /
 | `template` | – | edit the per-vault new-note template in `$EDITOR` |
 | `template show` | – | print the current template + which source (vault / built-in) |
 | `template reset` | – | drop the per-vault template, fall back to the built-in default |
-| `passphrase` | – | rotate this vault's passphrase (the previous `.bak` is removed so an old-passphrase copy doesn't linger) |
+| `passphrase` | – | rotate this vault's passphrase (the previous `.bak` is removed so an old-passphrase copy doesn't linger; on v2 vaults the recovery key is preserved) |
+| `recovery-info` | – | print the vault's recovery type (`seed-bip39` / `secret-key` / none). No params, no secrets. |
 | `export [-o p] [--force]` | flags | print decrypted JSON to stdout, or write to a file (file write needs `--force` to overwrite) |
 | `import <json> [--mode merge\|replace] [-y]` | path + flags | merge (default) or replace using JSON produced by `export`. Merge conflicts kept under `<name>.conflict-YYYYMMDD[-N]` |
 | `help` / `?` | – | show this list |
@@ -209,9 +220,34 @@ clipboard_clear_seconds = 60
 Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
 `vim` / `vi` (or `notepad` on Windows).
 
+## Recovery key (v0.3+)
+
+Every vault created with v0.3+ ships with a **recovery key** displayed
+once at `init` time:
+
+| flag | result | typical use |
+|---|---|---|
+| `kpot init <file>` | 12-word BIP-39 seed (default) | best for paper backup |
+| `kpot init <file> --recovery seed --recovery-words 24` | 24-word BIP-39 seed | paranoid mode, 256-bit |
+| `kpot init <file> --recovery key` | 32-byte secret rendered as Crockford Base32 | best for password manager paste |
+
+Recovery is **issued once and cannot be reissued**. The vault file
+embeds an immutable `recovery_wrap` alongside the everyday
+`passphrase_wrap`, so:
+
+- Forgot the passphrase → `kpot <file> --recover` opens the vault
+  using the recovery key, then `passphrase` rotates to a new everyday
+  passphrase. Recovery key continues to work.
+- Lost both → vault is **permanently unrecoverable**. No backdoor.
+- v1 vaults (created with v0.1/v0.2) keep working without recovery.
+  Adding recovery requires `export` → new vault → `import`.
+
+Display safety: `init` refuses to run when stdin or stdout aren't
+real TTYs, and writes the seed to `/dev/tty` (not stdout/stderr) so
+it doesn't leak into shell scrollback, log files, or CI artifacts.
+
 ## Out of scope (future PRs)
 
-- v0.3: seed-phrase recovery (BIP-39, format v2)
 - v0.4: OS keychain caching (macOS Keychain / Linux libsecret / DPAPI)
 - v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,
   `<file>.lock`, optional payload metadata for merge automation. Bytes
@@ -233,6 +269,7 @@ internal/editor              $EDITOR launcher, tmpfs temp file
 internal/clipboard           cross-platform copy + 30s auto-clear manager
 internal/notefmt             editor frontmatter render/strip, template, placeholders
 internal/config              ~/.config/kpot/config.toml loader (BurntSushi/toml)
-internal/tty                 passphrase prompt (no echo, KPOT_PASSPHRASE bypass), shared bufio.Reader
+internal/recovery            BIP-39 seed + Crockford-Base32 secret-key encoders, KEK derivation
+internal/tty                 passphrase prompt (no echo, KPOT_PASSPHRASE bypass), TTY-only recovery display
 docs/format.md               on-disk file format spec (v1)
 ```
