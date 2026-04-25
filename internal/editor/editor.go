@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -123,6 +122,4 @@ func wipeAndRemove(path string) {
 		}
 	}
 	_ = os.Remove(path)
-	// also clean parent if it was a tmp dir we created (we didn't, so no-op)
-	_ = filepath.Dir
 }

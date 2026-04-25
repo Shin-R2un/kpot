@@ -2,6 +2,7 @@ package tty
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -67,7 +68,7 @@ func ReadNewPassphrase(prompt, confirmPrompt string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if string(first) != string(second) {
+	if subtle.ConstantTimeCompare(first, second) != 1 {
 		// Best-effort wipe of the rejected entries before returning.
 		for i := range first {
 			first[i] = 0
