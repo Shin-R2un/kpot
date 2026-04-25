@@ -10,12 +10,21 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
+)
+
+// Keychain mode controls whether kpot caches the per-vault open key
+// in the OS-native secret store. Empty == KeychainAuto.
+const (
+	KeychainAuto   = "auto"   // prompt once per vault on first cache miss
+	KeychainAlways = "always" // cache silently after every successful open
+	KeychainNever  = "never"  // never read or write the keychain
 )
 
 // Config holds the values read from config.toml. New fields must be
@@ -29,6 +38,22 @@ type Config struct {
 	// ClipboardClearSeconds overrides the 30-second auto-clear default.
 	// Zero means "use the default". Negative is rejected at load time.
 	ClipboardClearSeconds int `toml:"clipboard_clear_seconds"`
+
+	// Keychain controls OS-keychain caching of vault open keys.
+	// Valid values: "auto" (default), "always", "never". Validated
+	// at load time.
+	Keychain string `toml:"keychain"`
+}
+
+// KeychainMode normalizes Config.Keychain, defaulting empty to
+// KeychainAuto. Always returns one of the three KeychainXxx constants.
+func (c Config) KeychainMode() string {
+	switch c.Keychain {
+	case KeychainAlways, KeychainNever:
+		return c.Keychain
+	default:
+		return KeychainAuto
+	}
 }
 
 // ClipboardTTL returns the configured clipboard auto-clear duration,
@@ -76,6 +101,12 @@ func LoadFrom(path string) (Config, error) {
 	}
 	if cfg.ClipboardClearSeconds < 0 {
 		return Config{}, errors.New("config: clipboard_clear_seconds must be >= 0")
+	}
+	switch cfg.Keychain {
+	case "", KeychainAuto, KeychainAlways, KeychainNever:
+		// ok
+	default:
+		return Config{}, fmt.Errorf("config: keychain must be auto | always | never (got %q)", cfg.Keychain)
 	}
 	return cfg, nil
 }

@@ -220,6 +220,62 @@ func TestRekeyV2RejectsV1(t *testing.T) {
 	}
 }
 
+func TestOpenWithKeyV2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v2.kpot")
+	pt := []byte(`{"v":2,"notes":{"k":"sk-aaa"}}`)
+	dek, _, err := CreateV2WithRecovery(path, []byte("p"), WrapKindSeed, fakeRecoveryKEK(0x42), pt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// OpenWithKey skips passphrase + KDF; just decrypts payload with DEK.
+	got, _, err := OpenWithKey(path, dek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, pt) {
+		t.Fatalf("OpenWithKey plaintext mismatch")
+	}
+}
+
+func TestOpenWithKeyV1(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1.kpot")
+	pass := []byte("p")
+	pt := []byte(`{"v":1,"notes":{"k":"v"}}`)
+	if _, _, err := Create(path, pass, pt); err != nil {
+		t.Fatal(err)
+	}
+	// Reopen via passphrase to obtain the derived key, then exercise
+	// OpenWithKey using that same key.
+	_, key, _, err := Open(path, pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.Zero(key)
+
+	got, _, err := OpenWithKey(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, pt) {
+		t.Fatalf("OpenWithKey v1 plaintext mismatch")
+	}
+}
+
+func TestOpenWithKeyWrongKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v2.kpot")
+	if _, _, err := CreateV2WithRecovery(path, []byte("p"), WrapKindSeed, fakeRecoveryKEK(0x11), []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	bogus := make([]byte, 32)
+	if _, _, err := OpenWithKey(path, bogus); !errors.Is(err, crypto.ErrAuthFailed) {
+		t.Fatalf("wrong key should authfail, got %v", err)
+	}
+}
+
 func TestRekeyV1RejectsV2(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v2.kpot")
