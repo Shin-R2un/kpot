@@ -43,6 +43,36 @@ func sharedStdin() *bufio.Reader { return SharedStdin() }
 // paths in one binary need this; production code never calls it.
 func ResetEnvWarnForTest() { envWarnOnce = sync.Once{} }
 
+// ReadLine prompts on stderr and reads one line of (echoed) input as
+// a string. Use this for non-sensitive input only; sensitive input
+// should go through ReadLineSecret so the caller can zero the buffer.
+func ReadLine(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := sharedStdin().ReadString('\n')
+	if err != nil && (err != io.EOF || line == "") {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// ReadLineSecret reads one line of (echoed) input as a byte slice the
+// caller is expected to crypto.Zero after use. Use for recovery
+// secrets (seed phrases, recovery keys) so the user-typed bytes can
+// be wiped explicitly.
+//
+// Caveat: bufio.Reader internally buffers a copy we cannot reach, and
+// any string-typed downstream operation (e.g. BIP-39 validation) will
+// produce a string copy that lives until GC. This wipe is best-effort,
+// not airtight — same posture as crypto.Zero for keys.
+func ReadLineSecret(prompt string) ([]byte, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := sharedStdin().ReadString('\n')
+	if err != nil && (err != io.EOF || line == "") {
+		return nil, err
+	}
+	return []byte(strings.TrimRight(line, "\r\n")), nil
+}
+
 // ReadPassphrase prompts the user for a passphrase with no echo.
 // Falls back to plain stdin reading if the input is not a terminal
 // (useful for tests piping a passphrase). All non-TTY reads go through
