@@ -3,11 +3,18 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestEditWithStubEditor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The stub is a POSIX shell script; Windows can't exec it.
+		// The real Edit() path is exercised on macOS/Linux runners
+		// and via TestPickEditorPrecedence on every OS.
+		t.Skip("POSIX-shell stub not runnable on Windows")
+	}
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "stub-editor.sh")
 	script := `#!/bin/sh

@@ -467,10 +467,10 @@ func cmdRecoveryInfo(path string) error {
 //  3. On success after step 2 → optionally cache the open key.
 //
 // Caching policy by mode:
-//  - "auto"   : prompt "[Y/n]" when running interactively. Skip in
-//               non-interactive runs or when KPOT_PASSPHRASE is set.
-//  - "always" : cache silently when the backend is available.
-//  - "never"  : never read or write the keychain.
+//   - "auto"   : prompt "[Y/n]" when running interactively. Skip in
+//     non-interactive runs or when KPOT_PASSPHRASE is set.
+//   - "always" : cache silently when the backend is available.
+//   - "never"  : never read or write the keychain.
 func openSession(path string, cfg config.Config, noCache bool) (*repl.Session, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

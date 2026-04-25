@@ -494,10 +494,13 @@ func (s *Session) copy(name string) error {
 // authenticated (we have s.Key), so we only ask for the new value.
 //
 // v1 vaults: vault.Rekey re-derives the payload key under a new salt;
-//   the cached key (if any) is now stale → OnRekey hook invalidates it.
+//
+//	the cached key (if any) is now stale → OnRekey hook invalidates it.
+//
 // v2 vaults: vault.RekeyV2 rebuilds only the passphrase wrap; the DEK
-//   and the recovery wrap are preserved → cached DEK stays valid, no
-//   invalidation needed.
+//
+//	and the recovery wrap are preserved → cached DEK stays valid, no
+//	invalidation needed.
 //
 // After rekey we reopen to refresh s.Key/s.Hdr so subsequent saves in
 // this session use the new key, not the stale one.
