@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -32,6 +33,9 @@ type Session struct {
 	clip *clipboard.Manager
 	p    prompter
 	opts SessionOptions
+
+	idleMu    sync.Mutex
+	idleTimer *time.Timer
 }
 
 // SessionOptions tunes a Session at construction time. All fields are
@@ -48,6 +52,12 @@ type SessionOptions struct {
 	// DEK (cache stays valid). Errors from this callback are
 	// swallowed — caching is best-effort.
 	OnRekey func(prevVersion int)
+
+	// IdleTimeout, when > 0, force-closes the session after that
+	// duration of no command activity. The timer resets on every
+	// dispatched command. Zero = no idle lock (the test default;
+	// production cmd layer wires config.IdleTimeout in).
+	IdleTimeout time.Duration
 }
 
 // NewSession builds an interactive session. Use NewSessionWith to pass
@@ -109,6 +119,15 @@ func (s *Session) Run() error {
 		s.p = newLinerPrompter(s.completer())
 	}
 
+	// Idle lock: only arm when stdin is a TTY (otherwise heredoc tests
+	// hit the lock during their natural delays). When armed, the timer
+	// callback wipes the key and exits the process — there's no clean
+	// way to interrupt liner's blocking Prompt() call from outside.
+	if s.opts.IdleTimeout > 0 && term.IsTerminal(int(os.Stdin.Fd())) {
+		s.armIdleLock(s.opts.IdleTimeout)
+		defer s.disarmIdleLock()
+	}
+
 	fmt.Fprintf(s.out, "Opened %s (%d notes)\n", s.Path, len(s.Vault.Notes))
 	fmt.Fprintln(s.out, "Type 'help' for commands, 'exit' to quit.")
 	for {
@@ -120,15 +139,18 @@ func (s *Session) Run() error {
 			}
 			if errors.Is(err, errAbort) {
 				// Ctrl-C: discard the in-progress line, keep the REPL alive.
+				s.resetIdleLock()
 				continue
 			}
 			return err
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
+			s.resetIdleLock()
 			continue
 		}
 		s.p.AddHistory(line)
+		s.resetIdleLock()
 		args := strings.Fields(line)
 		cmd, args := args[0], args[1:]
 
@@ -140,6 +162,43 @@ func (s *Session) Run() error {
 			return nil
 		}
 	}
+}
+
+// armIdleLock starts a one-shot timer that closes the session and
+// exits the process if no activity arrives within d. Using AfterFunc
+// (not a select-loop) because the prompter's Prompt() call blocks on
+// stdin in raw mode — we can't multiplex it cleanly.
+func (s *Session) armIdleLock(d time.Duration) {
+	s.idleMu.Lock()
+	defer s.idleMu.Unlock()
+	s.idleTimer = time.AfterFunc(d, s.idleFire)
+}
+
+func (s *Session) resetIdleLock() {
+	s.idleMu.Lock()
+	defer s.idleMu.Unlock()
+	if s.idleTimer != nil {
+		s.idleTimer.Reset(s.opts.IdleTimeout)
+	}
+}
+
+func (s *Session) disarmIdleLock() {
+	s.idleMu.Lock()
+	defer s.idleMu.Unlock()
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
+}
+
+// idleFire runs in the timer's goroutine when the user has been idle
+// past the threshold. We can't return cleanly from Run() because it's
+// blocked in Prompt(); the only safe action is to wipe key material
+// and exit the process. The OS reclaims everything else.
+func (s *Session) idleFire() {
+	fmt.Fprintf(s.err, "\n(idle timeout — vault locked)\n")
+	s.Close()
+	os.Exit(0)
 }
 
 // completer returns a liner.WordCompleter wired to live note names.

@@ -62,6 +62,40 @@ func TestLoadFromRejectsNegativeTTL(t *testing.T) {
 	}
 }
 
+func TestIdleTimeoutDefaultsTo10Minutes(t *testing.T) {
+	cfg := Config{}
+	if got := cfg.IdleTimeout(); got != 10*time.Minute {
+		t.Fatalf("IdleTimeout default = %v, want 10m", got)
+	}
+}
+
+func TestIdleTimeoutHonorsConfig(t *testing.T) {
+	cfg := Config{IdleLockMinutes: 5}
+	if got := cfg.IdleTimeout(); got != 5*time.Minute {
+		t.Fatalf("IdleTimeout = %v, want 5m", got)
+	}
+}
+
+func TestLoadFromRejectsNegativeIdle(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTOML(t, dir, `idle_lock_minutes = -1`+"\n")
+	if _, err := LoadFrom(path); err == nil {
+		t.Fatal("expected error for negative idle_lock_minutes")
+	}
+}
+
+func TestLoadFromAcceptsIdle(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTOML(t, dir, `idle_lock_minutes = 30`+"\n")
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IdleLockMinutes != 30 {
+		t.Errorf("IdleLockMinutes = %d, want 30", cfg.IdleLockMinutes)
+	}
+}
+
 func TestKeychainModeDefaultsAuto(t *testing.T) {
 	cfg := Config{}
 	if cfg.KeychainMode() != KeychainAuto {

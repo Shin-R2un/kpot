@@ -9,8 +9,10 @@ func detect() (Clipboard, error) {
 		return nil, ErrUnavailable
 	}
 	return &execClipboard{
-		name:     "powershell-clipboard",
-		copyCmd:  func() *exec.Cmd { return exec.Command("powershell", "-NoProfile", "-Command", "$in = [Console]::In.ReadToEnd(); Set-Clipboard -Value $in") },
+		name: "powershell-clipboard",
+		copyCmd: func() *exec.Cmd {
+			return exec.Command("powershell", "-NoProfile", "-Command", "$in = [Console]::In.ReadToEnd(); Set-Clipboard -Value $in")
+		},
 		pasteCmd: func() *exec.Cmd { return exec.Command("powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw") },
 	}, nil
 }

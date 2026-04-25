@@ -41,9 +41,9 @@ func Detect() (Clipboard, error) { return detect() }
 // execClipboard is a generic shell-command-backed Clipboard. It is the
 // implementation used by every OS detect helper.
 type execClipboard struct {
-	name      string
-	copyCmd   func() *exec.Cmd
-	pasteCmd  func() *exec.Cmd // nil ⇒ paste unsupported
+	name     string
+	copyCmd  func() *exec.Cmd
+	pasteCmd func() *exec.Cmd // nil ⇒ paste unsupported
 }
 
 func (c *execClipboard) Name() string { return c.name }

@@ -219,6 +219,10 @@ clipboard_clear_seconds = 60
 # OS keychain caching: "auto" (prompt once per vault), "always" (cache
 # silently), or "never" (disabled).
 keychain = "auto"
+
+# REPL auto-closes after N minutes of no command activity (default 10).
+# Single-shot subcommands are unaffected.
+idle_lock_minutes = 10
 ```
 
 Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
@@ -319,6 +323,23 @@ Known limitation — macOS argv exposure:
   also read your `ps`). Linux uses stdin pipe and Windows uses syscall,
   so neither is affected. If this matters for your model, set
   `keychain = "never"` on macOS.
+
+## Idle lock
+
+When stdin is a real TTY, kpot starts a 10-minute idle timer at REPL
+launch. Any command, Ctrl-C, or empty ENTER resets the timer. If it
+fires, kpot wipes the in-memory key and exits the process:
+
+```
+kpot:personal>
+   ... 10 minutes pass ...
+(idle timeout — vault locked)
+$
+```
+
+Single-shot subcommands (`kpot <file> ls` etc.) don't enter the REPL
+and are unaffected. Adjust the period via `idle_lock_minutes` in
+`config.toml`.
 
 ## Out of scope (future PRs)
 - v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,

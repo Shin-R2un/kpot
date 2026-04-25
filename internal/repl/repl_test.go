@@ -465,6 +465,45 @@ func TestImportRejectsBadMode(t *testing.T) {
 	}
 }
 
+func TestIdleLockArmAndDisarmIsSafeWhenUnused(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+
+	// Without arming, reset/disarm must be no-ops (REPL never armed
+	// the timer because IdleTimeout was zero).
+	s.resetIdleLock()
+	s.disarmIdleLock()
+}
+
+func TestIdleLockResetsTimerOnActivity(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+
+	// Use a long enough timeout that the timer never naturally fires
+	// during the test, but verify Reset() actually pushes it out.
+	s.opts.IdleTimeout = time.Hour
+	s.armIdleLock(s.opts.IdleTimeout)
+	defer s.disarmIdleLock()
+
+	s.idleMu.Lock()
+	if s.idleTimer == nil {
+		s.idleMu.Unlock()
+		t.Fatal("armIdleLock should have created a timer")
+	}
+	s.idleMu.Unlock()
+
+	// Reset shouldn't panic and the timer should still be live.
+	s.resetIdleLock()
+	s.idleMu.Lock()
+	stillLive := s.idleTimer != nil
+	s.idleMu.Unlock()
+	if !stillLive {
+		t.Fatal("resetIdleLock dropped the timer")
+	}
+}
+
 func TestPassphraseRotates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v.kpot")

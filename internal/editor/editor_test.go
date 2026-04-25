@@ -73,12 +73,12 @@ func TestPickEditorPrecedence(t *testing.T) {
 
 func TestSanitize(t *testing.T) {
 	cases := map[string]string{
-		"":             "note",
-		"openai":       "openai",
-		"ai/openai":    "ai-openai",
-		"with space":   "withspace",
-		"a$b#c":        "abc",
-		"こんにちは":        "note",
+		"":           "note",
+		"openai":     "openai",
+		"ai/openai":  "ai-openai",
+		"with space": "withspace",
+		"a$b#c":      "abc",
+		"こんにちは":      "note",
 		"verylongnamethatdefinitelyexceedsthirtytwocharsmore": "verylongnamethatdefinitelyexceed",
 	}
 	for in, want := range cases {

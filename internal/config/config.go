@@ -43,6 +43,26 @@ type Config struct {
 	// Valid values: "auto" (default), "always", "never". Validated
 	// at load time.
 	Keychain string `toml:"keychain"`
+
+	// IdleLockMinutes auto-closes a REPL session after N minutes of
+	// no command activity. Zero means "use the default" (10 minutes).
+	// Negative is rejected at load time. -1 / "off" semantics: set to
+	// a very large number if you really want effectively-never.
+	IdleLockMinutes int `toml:"idle_lock_minutes"`
+}
+
+// DefaultIdleLockMinutes is the fallback when config doesn't set a
+// value. Plan §2.2 specifies 10 minutes.
+const DefaultIdleLockMinutes = 10
+
+// IdleTimeout returns the configured idle-lock duration. Zero in the
+// config field maps to the default; the caller never sees zero.
+func (c Config) IdleTimeout() time.Duration {
+	mins := c.IdleLockMinutes
+	if mins == 0 {
+		mins = DefaultIdleLockMinutes
+	}
+	return time.Duration(mins) * time.Minute
 }
 
 // KeychainMode normalizes Config.Keychain, defaulting empty to
@@ -101,6 +121,9 @@ func LoadFrom(path string) (Config, error) {
 	}
 	if cfg.ClipboardClearSeconds < 0 {
 		return Config{}, errors.New("config: clipboard_clear_seconds must be >= 0")
+	}
+	if cfg.IdleLockMinutes < 0 {
+		return Config{}, errors.New("config: idle_lock_minutes must be >= 0")
 	}
 	switch cfg.Keychain {
 	case "", KeychainAuto, KeychainAlways, KeychainNever:

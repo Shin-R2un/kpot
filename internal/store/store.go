@@ -19,9 +19,9 @@ type Note struct {
 }
 
 type DecryptedVault struct {
-	Version   int              `json:"version"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	Version   int       `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// Template is the per-vault new-note template body. Empty means
 	// "use the built-in default" — kept omitempty so existing v1 vaults
 	// without this field round-trip cleanly.

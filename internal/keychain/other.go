@@ -10,8 +10,8 @@ type noopBackend struct{}
 
 func defaultBackend() Backend { return &noopBackend{} }
 
-func (*noopBackend) Name() string                  { return "none" }
-func (*noopBackend) Available() bool               { return false }
-func (*noopBackend) Get(string) ([]byte, error)    { return nil, ErrUnavailable }
-func (*noopBackend) Set(string, []byte) error      { return ErrUnavailable }
-func (*noopBackend) Delete(string) error           { return ErrUnavailable }
+func (*noopBackend) Name() string               { return "none" }
+func (*noopBackend) Available() bool            { return false }
+func (*noopBackend) Get(string) ([]byte, error) { return nil, ErrUnavailable }
+func (*noopBackend) Set(string, []byte) error   { return ErrUnavailable }
+func (*noopBackend) Delete(string) error        { return ErrUnavailable }
