@@ -310,6 +310,16 @@ Headless / SSH / container considerations:
 - Sleep/wake: macOS keychain may auto-lock; Linux/Windows keep entries
   available for the duration of the login session.
 
+Known limitation — macOS argv exposure:
+- The `Set` path uses `/usr/bin/security add-generic-password -w <hex>`,
+  which means the hex-encoded key briefly appears in the process's
+  command line. macOS Big Sur+ restricts `ps` argv visibility to the
+  same UID, so this matches the same threat boundary as the keychain
+  entry itself (a same-user attacker who can read your keychain can
+  also read your `ps`). Linux uses stdin pipe and Windows uses syscall,
+  so neither is affected. If this matters for your model, set
+  `keychain = "never"` on macOS.
+
 ## Out of scope (future PRs)
 - v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,
   `<file>.lock`, optional payload metadata for merge automation. Bytes

@@ -480,7 +480,11 @@ func openSession(path string, cfg config.Config, noCache bool) (*repl.Session, e
 	}
 
 	mode := cfg.KeychainMode()
-	envBypass := os.Getenv(tty.PassphraseEnv) != ""
+	// LookupEnv (not Getenv) so KPOT_PASSPHRASE="" is treated the same
+	// way tty.ReadPassphrase treats it: env-set means env-driven, even
+	// if the value happens to be empty. Using "!= ""\" here would
+	// silently disagree with the tty package and re-prompt instead.
+	_, envBypass := os.LookupEnv(tty.PassphraseEnv)
 	useCache := !noCache && !envBypass && mode != config.KeychainNever
 	account := keychain.CanonicalAccount(path)
 
@@ -575,7 +579,7 @@ func maybeCacheKey(account string, key []byte, mode string) {
 	case config.KeychainAuto:
 		// Only ask interactively. Non-TTY runs (cron, CI) silently
 		// skip — they shouldn't be writing to the user's keychain.
-		if !isStdinTTY() {
+		if !tty.IsStdinTTY() {
 			return
 		}
 		ans, err := tty.ReadLine("Cache key in OS keychain so future opens skip the passphrase? [Y/n]: ")
@@ -595,13 +599,6 @@ func maybeCacheKey(account string, key []byte, mode string) {
 	}
 }
 
-func isStdinTTY() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
 
 type argsError struct{ msg string }
 

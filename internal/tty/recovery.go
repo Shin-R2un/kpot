@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"golang.org/x/term"
 )
 
 // ErrNoTTY is returned by recovery-display helpers when stdin/stdout
@@ -24,7 +22,7 @@ var ErrNoTTY = errors.New("recovery operations require a TTY (no pipes / redirec
 // header is the leading "WRITE THIS DOWN" warning block. body is the
 // secret itself (mnemonic words or formatted secret-key string).
 func DisplayRecoveryOnce(header, body string) error {
-	if !stdinIsTTY() || !stdoutIsTTY() {
+	if !IsStdinTTY() || !IsStdoutTTY() {
 		return ErrNoTTY
 	}
 
@@ -71,5 +69,3 @@ func FormatSeedWords(mnemonic string) string {
 	return b.String()
 }
 
-func stdinIsTTY() bool  { return term.IsTerminal(int(os.Stdin.Fd())) }
-func stdoutIsTTY() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
