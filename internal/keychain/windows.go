@@ -34,11 +34,11 @@ const credPersistLocalMachine = 2
 const errorNotFound syscall.Errno = 1168
 
 var (
-	advapi32       = windows.NewLazySystemDLL("advapi32.dll")
-	procCredReadW  = advapi32.NewProc("CredReadW")
-	procCredWriteW = advapi32.NewProc("CredWriteW")
+	advapi32        = windows.NewLazySystemDLL("advapi32.dll")
+	procCredReadW   = advapi32.NewProc("CredReadW")
+	procCredWriteW  = advapi32.NewProc("CredWriteW")
 	procCredDeleteW = advapi32.NewProc("CredDeleteW")
-	procCredFree   = advapi32.NewProc("CredFree")
+	procCredFree    = advapi32.NewProc("CredFree")
 )
 
 // credentialW mirrors the CREDENTIALW struct from wincred.h. Field

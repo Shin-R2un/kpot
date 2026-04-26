@@ -467,10 +467,10 @@ func cmdRecoveryInfo(path string) error {
 //  3. On success after step 2 → optionally cache the open key.
 //
 // Caching policy by mode:
-//  - "auto"   : prompt "[Y/n]" when running interactively. Skip in
-//               non-interactive runs or when KPOT_PASSPHRASE is set.
-//  - "always" : cache silently when the backend is available.
-//  - "never"  : never read or write the keychain.
+//   - "auto"   : prompt "[Y/n]" when running interactively. Skip in
+//     non-interactive runs or when KPOT_PASSPHRASE is set.
+//   - "always" : cache silently when the backend is available.
+//   - "never"  : never read or write the keychain.
 func openSession(path string, cfg config.Config, noCache bool) (*repl.Session, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -538,6 +538,7 @@ func buildSession(path string, plaintext, key []byte, hdr *vault.Header, cfg con
 	}
 	return repl.NewSessionWith(path, v, key, hdr, repl.SessionOptions{
 		ClipboardTTL: cfg.ClipboardTTL(),
+		IdleTimeout:  cfg.IdleTimeout(),
 		OnRekey: func(prevVersion int) {
 			// v2 rekey preserves the DEK, so the cached entry is
 			// still valid. Only invalidate after v1 rotations.
@@ -599,16 +600,15 @@ func maybeCacheKey(account string, key []byte, mode string) {
 	}
 }
 
-
 type argsError struct{ msg string }
 
 func (e *argsError) Error() string { return e.msg }
-func errArgs(msg string) error    { return &argsError{msg: msg} }
+func errArgs(msg string) error     { return &argsError{msg: msg} }
 
 type authError struct{ msg string }
 
 func (e *authError) Error() string { return e.msg }
-func errAuth(msg string) error    { return &authError{msg: msg} }
+func errAuth(msg string) error     { return &authError{msg: msg} }
 
 func exitCodeFor(err error) int {
 	var ae *argsError

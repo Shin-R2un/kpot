@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel in-flight runs for the same branch when a new commit lands —
+# the latest commit is the only one that matters for merge gating.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: gofmt
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./... -count=1 -timeout=120s
+
+  cross-build:
+    name: cross-build (linux → darwin/windows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: build darwin/amd64
+        run: GOOS=darwin GOARCH=amd64 go build ./...
+      - name: build darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+      - name: build windows/amd64
+        run: GOOS=windows GOARCH=amd64 go build ./...

@@ -12,9 +12,10 @@ import (
 )
 
 // secretToolBin is the libsecret-tools CLI. Available via:
-//   Debian/Ubuntu : apt install libsecret-tools
-//   Fedora/RHEL   : dnf install libsecret
-//   Arch          : pacman -S libsecret
+//
+//	Debian/Ubuntu : apt install libsecret-tools
+//	Fedora/RHEL   : dnf install libsecret
+//	Arch          : pacman -S libsecret
 const secretToolBin = "secret-tool"
 
 // secret-tool exit codes (from man page):

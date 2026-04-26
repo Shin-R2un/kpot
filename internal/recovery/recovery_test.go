@@ -8,13 +8,13 @@ import (
 
 func TestParseType(t *testing.T) {
 	cases := map[string]Type{
-		"seed":        TypeSeedBIP39,
-		"SEED":        TypeSeedBIP39,
-		"seed-bip39":  TypeSeedBIP39,
-		"bip39":       TypeSeedBIP39,
-		"key":         TypeSecretKey,
-		"secret-key":  TypeSecretKey,
-		"  Key  ":     TypeSecretKey,
+		"seed":       TypeSeedBIP39,
+		"SEED":       TypeSeedBIP39,
+		"seed-bip39": TypeSeedBIP39,
+		"bip39":      TypeSeedBIP39,
+		"key":        TypeSecretKey,
+		"secret-key": TypeSecretKey,
+		"  Key  ":    TypeSecretKey,
 	}
 	for in, want := range cases {
 		got, err := ParseType(in)

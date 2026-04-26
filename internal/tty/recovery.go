@@ -47,7 +47,7 @@ func DisplayRecoveryOnce(header, body string) error {
 	fmt.Fprint(tty, "書き留めましたか？ ENTER で画面を消去します… ")
 
 	buf := make([]byte, 256)
-	_, _ = tty.Read(buf) // best effort; we just want the user's ENTER
+	_, _ = tty.Read(buf)             // best effort; we just want the user's ENTER
 	fmt.Fprint(tty, "\033[2J\033[H") // ANSI: clear screen + home cursor
 	return nil
 }
@@ -68,4 +68,3 @@ func FormatSeedWords(mnemonic string) string {
 	}
 	return b.String()
 }
-

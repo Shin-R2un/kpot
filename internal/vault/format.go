@@ -19,9 +19,9 @@ const (
 	WrapKindSeed       = "seed-bip39"
 	WrapKindSecretKey  = "secret-key"
 
-	KDFArgon2id    = "argon2id"
+	KDFArgon2id     = "argon2id"
 	KDFPBKDF2SHA512 = "pbkdf2-sha512"
-	KDFHKDFSHA256  = "hkdf-sha256"
+	KDFHKDFSHA256   = "hkdf-sha256"
 )
 
 // KDFSection captures Argon2id parameters for a v1 vault header. v2
@@ -42,9 +42,9 @@ type CipherSection struct {
 // use different fields — only the ones relevant to Name need to be set.
 type WrapKDF struct {
 	Name       string                 `json:"name"`
-	Salt       string                 `json:"salt,omitempty"`        // argon2id, pbkdf2
-	Params     *crypto.Argon2idParams `json:"params,omitempty"`      // argon2id only
-	Iterations uint32                 `json:"iterations,omitempty"`  // pbkdf2 only
+	Salt       string                 `json:"salt,omitempty"`       // argon2id, pbkdf2
+	Params     *crypto.Argon2idParams `json:"params,omitempty"`     // argon2id only
+	Iterations uint32                 `json:"iterations,omitempty"` // pbkdf2 only
 }
 
 // Wrap is one independent path that can unlock the vault's DEK. v2
@@ -183,9 +183,9 @@ func (h *Header) AAD() ([]byte, error) {
 // authentication on unwrap.
 func (h *Header) WrapAAD(w *Wrap) ([]byte, error) {
 	type wrapAAD struct {
-		Format  string  `json:"format"`
-		Version int     `json:"version"`
-		Wrap    Wrap    `json:"wrap"`
+		Format  string `json:"format"`
+		Version int    `json:"version"`
+		Wrap    Wrap   `json:"wrap"`
 	}
 	wCopy := *w
 	wCopy.WrappedDEK = "" // bind everything except the ciphertext itself

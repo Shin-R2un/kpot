@@ -111,8 +111,8 @@ func TestFind(t *testing.T) {
 		wantNames []string
 	}{
 		{"openai", []string{"ai/openai", "server/fw0"}},
-		{"OPENAI", []string{"ai/openai", "server/fw0"}}, // case-insensitive
-		{"ssh", []string{"server/fw0"}},                 // body only
+		{"OPENAI", []string{"ai/openai", "server/fw0"}},             // case-insensitive
+		{"ssh", []string{"server/fw0"}},                             // body only
 		{"ai", []string{"ai/anthropic", "ai/openai", "server/fw0"}}, // hits "ai" via name and via "openai" in body
 		{"none-here", nil},
 		{"   ", nil},
