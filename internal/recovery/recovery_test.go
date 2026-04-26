@@ -80,12 +80,25 @@ func TestSeedRejectsBadWordCount(t *testing.T) {
 func TestSeedToKEKRejectsBadChecksum(t *testing.T) {
 	mnemonic, _ := GenerateSeed(12)
 	words := strings.Fields(mnemonic)
-	// Swap the last word to break the BIP-39 checksum.
-	words[11] = "zoo"
-	bad := strings.Join(words, " ")
-	if _, err := SeedToKEK(bad); err == nil {
-		t.Fatal("expected checksum failure")
+
+	// BIP-39 12-word seeds embed a 4-bit checksum, so a single random
+	// last-word swap accidentally produces a valid mnemonic about 1
+	// time in 16 (this test was flaky on the Windows CI run that
+	// landed an unlucky seed). Try several candidate words until at
+	// least one produces an invalid checksum — collisions across all
+	// 5 attempts would be (1/16)^5 ≈ 1 in a million.
+	candidates := []string{"zoo", "zone", "yellow", "wisdom", "winter"}
+	for _, c := range candidates {
+		if c == words[11] {
+			continue
+		}
+		words[11] = c
+		bad := strings.Join(words, " ")
+		if _, err := SeedToKEK(bad); err != nil {
+			return // got the expected failure, done
+		}
 	}
+	t.Fatal("none of the candidate last-word swaps broke the BIP-39 checksum")
 }
 
 func TestSeedToKEKAcceptsMessyInput(t *testing.T) {
