@@ -504,6 +504,186 @@ func TestIdleLockResetsTimerOnActivity(t *testing.T) {
 	}
 }
 
+func TestBundleAndImportBundleRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	// Source vault A — has 3 notes; we'll bundle 2 of them.
+	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))
+	defer a.Close()
+	a.Vault.Put("ai/openai", "sk-aaaa")
+	a.Vault.Put("server/fw0", "ssh user@fw0")
+	a.Vault.Put("misc/notes", "diary entry")
+	a.persist()
+
+	bundlePath := filepath.Join(dir, "transfer.kpb")
+	t.Setenv("KPOT_PASSPHRASE", "bundle-pass")
+	tty.ResetEnvWarnForTest()
+
+	// Bundle 2 notes (skip misc/notes).
+	if _, err := a.dispatch("bundle", []string{"ai/openai", "server/fw0", "-o", bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(bundlePath)
+	if err != nil {
+		t.Fatalf("bundle file not written: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("bundle file perm = %o, want 0600", info.Mode().Perm())
+	}
+
+	// Destination vault B — empty. Import the bundle.
+	b := scriptedSession(t, filepath.Join(dir, "b.kpot"))
+	defer b.Close()
+	if got := len(b.Vault.Notes); got != 0 {
+		t.Fatalf("vault B should start empty, got %d notes", got)
+	}
+
+	var buf bytes.Buffer
+	b.out = &buf
+	withInput(b, "y\n") // confirm
+	if _, err := b.dispatch("import-bundle", []string{bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both selected notes should now be in B; misc/notes should NOT.
+	if n, ok := b.Vault.Get("ai/openai"); !ok || n.Body != "sk-aaaa" {
+		t.Errorf("ai/openai missing or wrong body: ok=%v", ok)
+	}
+	if n, ok := b.Vault.Get("server/fw0"); !ok || n.Body != "ssh user@fw0" {
+		t.Errorf("server/fw0 missing or wrong body: ok=%v", ok)
+	}
+	if _, ok := b.Vault.Get("misc/notes"); ok {
+		t.Error("misc/notes should not have been bundled")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "bundle contains 2 notes") {
+		t.Errorf("preview missing: %q", out)
+	}
+	if !strings.Contains(out, "imported: +2 new") {
+		t.Errorf("import summary missing: %q", out)
+	}
+}
+
+func TestBundleRequiresOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+	s.Vault.Put("openai", "sk")
+	s.persist()
+	t.Setenv("KPOT_PASSPHRASE", "p")
+	tty.ResetEnvWarnForTest()
+
+	if _, err := s.dispatch("bundle", []string{"openai"}); err == nil {
+		t.Fatal("expected error: bundle requires -o")
+	}
+}
+
+func TestBundleRejectsMissingNote(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+	t.Setenv("KPOT_PASSPHRASE", "p")
+	tty.ResetEnvWarnForTest()
+
+	if _, err := s.dispatch("bundle", []string{"nope", "-o", filepath.Join(dir, "x.kpb")}); err == nil {
+		t.Fatal("expected error for missing note")
+	}
+}
+
+func TestImportBundleWrongPassphrase(t *testing.T) {
+	dir := t.TempDir()
+
+	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))
+	defer a.Close()
+	a.Vault.Put("k", "v")
+	a.persist()
+	bundlePath := filepath.Join(dir, "x.kpb")
+	t.Setenv("KPOT_PASSPHRASE", "bundle-pw")
+	tty.ResetEnvWarnForTest()
+	if _, err := a.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to import with the wrong passphrase by re-setting the env var.
+	b := scriptedSession(t, filepath.Join(dir, "b.kpot"))
+	defer b.Close()
+	t.Setenv("KPOT_PASSPHRASE", "wrong-pw")
+	tty.ResetEnvWarnForTest()
+	withInput(b, "y\n")
+
+	_, err := b.dispatch("import-bundle", []string{bundlePath})
+	if err == nil || !strings.Contains(err.Error(), "Wrong passphrase") {
+		t.Fatalf("expected wrong-passphrase error, got %v", err)
+	}
+}
+
+func TestImportBundleConflictRenamed(t *testing.T) {
+	dir := t.TempDir()
+
+	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))
+	defer a.Close()
+	a.Vault.Put("ai/openai", "from-a-side")
+	a.persist()
+	bundlePath := filepath.Join(dir, "x.kpb")
+	t.Setenv("KPOT_PASSPHRASE", "p")
+	tty.ResetEnvWarnForTest()
+	if _, err := a.dispatch("bundle", []string{"ai/openai", "-o", bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	// B already has ai/openai with different content.
+	b := scriptedSession(t, filepath.Join(dir, "b.kpot"))
+	defer b.Close()
+	b.Vault.Put("ai/openai", "from-b-side")
+	b.persist()
+
+	withInput(b, "y\n")
+	if _, err := b.dispatch("import-bundle", []string{bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, _ := b.Vault.Get("ai/openai"); n.Body != "from-b-side" {
+		t.Errorf("local ai/openai got overwritten: %q", n.Body)
+	}
+	found := false
+	for _, name := range b.Vault.Names() {
+		if strings.HasPrefix(name, "ai/openai.conflict-") {
+			found = true
+			n, _ := b.Vault.Get(name)
+			if n.Body != "from-a-side" {
+				t.Errorf("conflict body = %q, want from-a-side", n.Body)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected an ai/openai.conflict-* entry, got names=%v", b.Vault.Names())
+	}
+}
+
+func TestImportBundleYesFlag(t *testing.T) {
+	dir := t.TempDir()
+	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))
+	defer a.Close()
+	a.Vault.Put("k", "v")
+	a.persist()
+	bundlePath := filepath.Join(dir, "x.kpb")
+	t.Setenv("KPOT_PASSPHRASE", "p")
+	tty.ResetEnvWarnForTest()
+	if _, err := a.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	b := scriptedSession(t, filepath.Join(dir, "b.kpot"))
+	defer b.Close()
+	withInput(b, "") // no input — -y should skip the confirm prompt
+	if _, err := b.dispatch("import-bundle", []string{bundlePath, "-y"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.Vault.Get("k"); !ok {
+		t.Fatal("note not imported")
+	}
+}
+
 func TestPassphraseRotates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v.kpot")
