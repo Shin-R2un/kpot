@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -527,7 +528,9 @@ func TestBundleAndImportBundleRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bundle file not written: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows ignores POSIX mode bits — os.WriteFile(_, _, 0o600)
+	// produces a file that Stat reports as 0666. Only verify on Unix.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("bundle file perm = %o, want 0600", info.Mode().Perm())
 	}
 
