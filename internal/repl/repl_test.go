@@ -663,6 +663,29 @@ func TestImportBundleConflictRenamed(t *testing.T) {
 	}
 }
 
+func TestBundleRefusesToClobberWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+	s.Vault.Put("k", "v")
+	s.persist()
+	bundlePath := filepath.Join(dir, "out.kpb")
+	t.Setenv("KPOT_PASSPHRASE", "p")
+	tty.ResetEnvWarnForTest()
+
+	if _, err := s.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
+		t.Fatal(err)
+	}
+	// Second write to the same path should be rejected.
+	if _, err := s.dispatch("bundle", []string{"k", "-o", bundlePath}); err == nil {
+		t.Fatal("expected refusal to overwrite without --force")
+	}
+	// With --force it succeeds.
+	if _, err := s.dispatch("bundle", []string{"k", "-o", bundlePath, "--force"}); err != nil {
+		t.Fatalf("--force should allow overwrite: %v", err)
+	}
+}
+
 func TestImportBundleYesFlag(t *testing.T) {
 	dir := t.TempDir()
 	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))

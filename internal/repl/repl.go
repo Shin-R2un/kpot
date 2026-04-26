@@ -309,7 +309,7 @@ func (s *Session) help() {
 	fmt.Fprintln(s.out, "                  print decrypted JSON to stdout (or write to a file)")
 	fmt.Fprintln(s.out, "  import <json> [--mode merge|replace] [-y]")
 	fmt.Fprintln(s.out, "                  pull notes from a previously exported JSON")
-	fmt.Fprintln(s.out, "  bundle <name>... -o <path>")
+	fmt.Fprintln(s.out, "  bundle <name>... -o <path> [--force]")
 	fmt.Fprintln(s.out, "                  encrypt selected notes into a portable .kpb file")
 	fmt.Fprintln(s.out, "  import-bundle <path> [-y]")
 	fmt.Fprintln(s.out, "                  decrypt a .kpb (asks for source passphrase) and merge in")
@@ -707,12 +707,21 @@ func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
 // (typically the same as the vault's, but doesn't have to be — they
 // could pick something else to share with a recipient).
 //
-// Usage: bundle <name>... -o <path>
+// Usage: bundle <name>... -o <path> [--force]
 func (s *Session) bundle(args []string) error {
-	names, outPath, err := parseBundleArgs(args)
+	names, outPath, force, err := parseBundleArgs(args)
 	if err != nil {
 		return err
 	}
+	// Refuse to clobber an existing file unless --force, matching the
+	// export command's posture so users don't lose old bundles by
+	// rerunning a similar command.
+	if _, statErr := os.Stat(outPath); statErr == nil && !force {
+		return fmt.Errorf("%s already exists; pass --force to overwrite", outPath)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+
 	// Canonicalize names and verify all exist before any prompting.
 	canon := make([]string, 0, len(names))
 	for _, raw := range names {
@@ -747,6 +756,7 @@ func (s *Session) bundle(args []string) error {
 		return err
 	}
 	fmt.Fprintf(s.out, "wrote %d notes to %s\n", len(canon), outPath)
+	fmt.Fprintln(s.out, "note: share the passphrase via a separate channel — anyone with both can read.")
 	return nil
 }
 
@@ -815,33 +825,35 @@ func (s *Session) importBundle(args []string) error {
 	return s.persist()
 }
 
-// parseBundleArgs splits "bundle" arguments into note names and the
-// required -o output path. Order doesn't matter; -o can appear before
-// or after names.
-func parseBundleArgs(args []string) (names []string, outPath string, err error) {
+// parseBundleArgs splits "bundle" arguments into note names, the
+// required -o output path, and a --force flag. Order doesn't matter;
+// flags can appear before or after names.
+func parseBundleArgs(args []string) (names []string, outPath string, force bool, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
 		case "-o", "--output":
 			if i+1 >= len(args) {
-				return nil, "", errors.New("-o requires a path")
+				return nil, "", false, errors.New("-o requires a path")
 			}
 			outPath = args[i+1]
 			i++
+		case "-f", "--force":
+			force = true
 		default:
 			if strings.HasPrefix(a, "-") {
-				return nil, "", fmt.Errorf("unknown flag: %s", a)
+				return nil, "", false, fmt.Errorf("unknown flag: %s", a)
 			}
 			names = append(names, a)
 		}
 	}
 	if len(names) == 0 {
-		return nil, "", errors.New("bundle requires at least one note name")
+		return nil, "", false, errors.New("bundle requires at least one note name")
 	}
 	if outPath == "" {
-		return nil, "", errors.New("bundle requires -o <path>")
+		return nil, "", false, errors.New("bundle requires -o <path>")
 	}
-	return names, outPath, nil
+	return names, outPath, force, nil
 }
 
 // snippetFrom returns the first non-empty line of body, trimmed and
