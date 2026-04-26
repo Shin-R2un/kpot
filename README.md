@@ -101,6 +101,8 @@ line, or the note name after a command that takes one (`note` / `read` /
 | `recovery-info` | – | print the vault's recovery type (`seed-bip39` / `secret-key` / none). No params, no secrets. |
 | `export [-o p] [--force]` | flags | print decrypted JSON to stdout, or write to a file (file write needs `--force` to overwrite) |
 | `import <json> [--mode merge\|replace] [-y]` | path + flags | merge (default) or replace using JSON produced by `export`. Merge conflicts kept under `<name>.conflict-YYYYMMDD[-N]` |
+| `bundle <name>... -o <path>` | names + path | encrypt selected notes into a portable `.kpb` file (asks for a passphrase you'll share with the recipient) |
+| `import-bundle <path> [-y]` | path + flag | decrypt a `.kpb` (asks for source passphrase), preview, and merge in. Same conflict-naming as `import` |
 | `help` / `?` | – | show this list |
 | `exit` / `quit` / `q` / Ctrl-D | – | close the vault and quit |
 
@@ -324,6 +326,44 @@ Known limitation — macOS argv exposure:
   so neither is affected. If this matters for your model, set
   `keychain = "never"` on macOS.
 
+## Selective transfer between vaults (v0.5+)
+
+When you want to move a few notes from `b.kpot` into `a.kpot` —
+without exposing the rest of `b.kpot` or doing a full vault merge —
+use the **bundle** flow:
+
+```bash
+# On the source side: pick which notes to transfer
+kpot b.kpot bundle ai/openai server/fw0 -o transfer.kpb
+Bundle passphrase (recipient will need it): ********
+wrote 2 notes to transfer.kpb
+
+# Move transfer.kpb to the other machine (USB / Drive / email — the
+# file is already encrypted, so the transport doesn't have to be
+# trusted).
+
+# On the destination side: import the bundle into your own vault
+kpot a.kpot import-bundle transfer.kpb
+Source bundle passphrase: ********
+bundle contains 2 notes:
+  ai/openai                        OPENAI_API_KEY=sk-xxx...
+  server/fw0                       ssh user@fw0
+import 2 notes into this vault? [y/N]: y
+imported: +2 new, 0 conflicts renamed
+```
+
+A `.kpb` (kpot bundle) is a self-contained encrypted blob — the
+recipient never needs the source vault file, just the bundle and the
+bundle passphrase. Same crypto primitives as the vault format
+(Argon2id over the passphrase + XChaCha20-Poly1305 AEAD with header
+bound as AAD); name collisions on import land under
+`<name>.conflict-YYYYMMDD[-N]` so nothing is silently overwritten.
+
+This is intentionally **selective** rather than a full vault merge:
+the common workflow is "I want to move a few entries from one vault
+to another," not "combine everything." Use `export` / `import` if you
+genuinely want a full-vault merge (those operate on plaintext JSON).
+
 ## Idle lock
 
 When stdin is a real TTY, kpot starts a 10-minute idle timer at REPL
@@ -361,6 +401,7 @@ internal/repl                interactive command loop, prompter, TAB completion
 internal/editor              $EDITOR launcher, tmpfs temp file
 internal/clipboard           cross-platform copy + 30s auto-clear manager
 internal/notefmt             editor frontmatter render/strip, template, placeholders
+internal/bundle              .kpb selective-transfer format (Argon2id + XChaCha20)
 internal/config              ~/.config/kpot/config.toml loader (BurntSushi/toml)
 internal/recovery            BIP-39 seed + Crockford-Base32 secret-key encoders, KEK derivation
 internal/keychain            macOS Keychain / Linux secret-tool / Windows wincred (no third-party Go deps)

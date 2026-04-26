@@ -14,9 +14,18 @@ import (
 )
 
 // PassphraseEnv is the environment variable that bypasses the TTY
-// prompt. Useful for scripted/non-interactive runs; printed warning on
-// stderr so users notice when they leave it set in production.
+// prompt for VAULT-OPENING passphrases. Useful for scripted/non-
+// interactive runs; printed warning on stderr so users notice when
+// they leave it set in production.
 const PassphraseEnv = "KPOT_PASSPHRASE"
+
+// BundlePassphraseEnv is a SEPARATE env var for bundle creation /
+// import. Distinct from PassphraseEnv on purpose — bundle passphrases
+// are typically meant to be shared with a recipient (different secret
+// than your everyday vault passphrase). Reusing KPOT_PASSPHRASE for
+// bundle ops would silently make bundle pw == vault pw, defeating the
+// "share the bundle pw out-of-band" mental model.
+const BundlePassphraseEnv = "KPOT_BUNDLE_PASSPHRASE"
 
 var (
 	stdinReaderOnce sync.Once
@@ -51,6 +60,37 @@ func IsStdinTTY() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // IsStdoutTTY mirrors IsStdinTTY for stdout. Used by display flows
 // that must refuse to write secrets when the destination is captured.
 func IsStdoutTTY() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+
+// ReadBundlePassphrase reads a bundle-only passphrase. Same shape as
+// ReadPassphrase, but consults BundlePassphraseEnv instead of
+// PassphraseEnv so a vault-unlock env var doesn't silently determine
+// the bundle's passphrase too. The bundle passphrase is intended to
+// be shared with a recipient out-of-band; defaulting to the vault's
+// passphrase would defeat that.
+func ReadBundlePassphrase(prompt string) ([]byte, error) {
+	if env, ok := os.LookupEnv(BundlePassphraseEnv); ok {
+		envWarnOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "warning: "+BundlePassphraseEnv+" is set; bypassing TTY prompt for the bundle passphrase.")
+		})
+		return []byte(env), nil
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	defer fmt.Fprintln(os.Stderr)
+
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		if err != nil {
+			return nil, err
+		}
+		return b, nil
+	}
+	line, err := sharedStdin().ReadString('\n')
+	if err != nil && (err != io.EOF || line == "") {
+		return nil, err
+	}
+	return []byte(strings.TrimRight(line, "\r\n")), nil
+}
 
 // ReadLine prompts on stderr and reads one line of (echoed) input as
 // a string. Use this for non-sensitive input only; sensitive input

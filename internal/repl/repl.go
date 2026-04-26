@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/r2un/kpot/internal/bundle"
 	"github.com/r2un/kpot/internal/clipboard"
 	"github.com/r2un/kpot/internal/crypto"
 	"github.com/r2un/kpot/internal/editor"
@@ -283,6 +284,10 @@ func (s *Session) dispatch(cmd string, args []string) (stop bool, err error) {
 		return false, s.export(args)
 	case "import":
 		return false, s.importVault(args)
+	case "bundle":
+		return false, s.bundle(args)
+	case "import-bundle":
+		return false, s.importBundle(args)
 	default:
 		return false, fmt.Errorf("unknown command: %s (try 'help')", cmd)
 	}
@@ -304,6 +309,10 @@ func (s *Session) help() {
 	fmt.Fprintln(s.out, "                  print decrypted JSON to stdout (or write to a file)")
 	fmt.Fprintln(s.out, "  import <json> [--mode merge|replace] [-y]")
 	fmt.Fprintln(s.out, "                  pull notes from a previously exported JSON")
+	fmt.Fprintln(s.out, "  bundle <name>... -o <path> [--force]")
+	fmt.Fprintln(s.out, "                  encrypt selected notes into a portable .kpb file")
+	fmt.Fprintln(s.out, "  import-bundle <path> [-y]")
+	fmt.Fprintln(s.out, "                  decrypt a .kpb (asks for source passphrase) and merge in")
 	fmt.Fprintln(s.out, "  help            show this help")
 	fmt.Fprintln(s.out, "  exit            close the vault and quit")
 	fmt.Fprintln(s.out)
@@ -668,9 +677,19 @@ func (s *Session) importVault(args []string) error {
 	return s.persist()
 }
 
+// maxNoteNameLen mirrors store.NormalizeName's 128-char cap. Conflict
+// names must stay within this so subsequent Get/Put/Delete calls
+// (which all run NormalizeName) don't reject the entry we just stored.
+const maxNoteNameLen = 128
+
 // mergeNotes copies notes from src into dst. Same-key conflicts are
 // preserved under <name>.conflict-<YYYYMMDD>[-N] so the user can
 // resolve them manually later.
+//
+// If the original name is long enough that adding the conflict suffix
+// would exceed maxNoteNameLen, the prefix portion is truncated. Better
+// to truncate readably than to silently produce a name Get can't look
+// up — the user can still read/copy/rm it via the truncated name.
 func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
 	today := time.Now().Format("20060102")
 	for name, n := range src.Notes {
@@ -679,18 +698,224 @@ func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
 			added++
 			continue
 		}
-		base := name + ".conflict-" + today
+		base := truncatedConflictBase(name, today)
 		target := base
 		for i := 2; ; i++ {
 			if _, exists := dst.Notes[target]; !exists {
 				break
 			}
-			target = fmt.Sprintf("%s-%d", base, i)
+			candidate := fmt.Sprintf("%s-%d", base, i)
+			if len(candidate) > maxNoteNameLen {
+				// Trim base further to fit the -N tail; recompute candidate.
+				suffix := fmt.Sprintf("-%d", i)
+				room := maxNoteNameLen - len(suffix)
+				if room < 1 {
+					room = 1
+				}
+				candidate = base[:min(len(base), room)] + suffix
+			}
+			target = candidate
 		}
 		dst.Notes[target] = n
 		conflicts++
 	}
 	return added, conflicts
+}
+
+// truncatedConflictBase returns "<name>.conflict-<YYYYMMDD>", or — if
+// that would exceed maxNoteNameLen — a name-truncated variant. The
+// suffix is preserved verbatim (so users can grep for it), the prefix
+// is what gets shortened.
+func truncatedConflictBase(name, today string) string {
+	suffix := ".conflict-" + today
+	if len(name)+len(suffix) <= maxNoteNameLen {
+		return name + suffix
+	}
+	room := maxNoteNameLen - len(suffix)
+	if room < 1 {
+		room = 1
+	}
+	return name[:room] + suffix
+}
+
+// min returns the smaller of two ints. Stdlib provides one in Go 1.21+,
+// but we still target 1.18 in go.mod.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// bundle exports the named notes into a self-contained encrypted
+// .kpb file. The bundle is keyed by a passphrase the user types now
+// (typically the same as the vault's, but doesn't have to be — they
+// could pick something else to share with a recipient).
+//
+// Usage: bundle <name>... -o <path> [--force]
+func (s *Session) bundle(args []string) error {
+	names, outPath, force, err := parseBundleArgs(args)
+	if err != nil {
+		return err
+	}
+	// Refuse to clobber an existing file unless --force, matching the
+	// export command's posture so users don't lose old bundles by
+	// rerunning a similar command.
+	if _, statErr := os.Stat(outPath); statErr == nil && !force {
+		return fmt.Errorf("%s already exists; pass --force to overwrite", outPath)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+
+	// Canonicalize names and verify all exist before any prompting.
+	canon := make([]string, 0, len(names))
+	for _, raw := range names {
+		c, err := store.NormalizeName(raw)
+		if err != nil {
+			return err
+		}
+		if _, ok := s.Vault.Notes[c]; !ok {
+			return fmt.Errorf("note %q not found", c)
+		}
+		canon = append(canon, c)
+	}
+
+	pass, err := tty.ReadBundlePassphrase("Bundle passphrase (recipient will need it): ")
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(pass)
+	if len(pass) == 0 {
+		return errors.New("bundle passphrase cannot be empty")
+	}
+
+	notes, err := bundle.FromStoreNotes(s.Vault.Notes, canon)
+	if err != nil {
+		return err
+	}
+	blob, err := bundle.Build(notes, pass)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(outPath, blob, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "wrote %d notes to %s\n", len(canon), outPath)
+	fmt.Fprintln(s.out, "note: share the passphrase via a separate channel — anyone with both can read.")
+	return nil
+}
+
+// importBundle reads a .kpb file, decrypts it with the source
+// passphrase, shows a preview, and (after confirmation) merges the
+// notes into the current vault. Same conflict-naming rules as
+// `import` (.conflict-YYYYMMDD[-N] suffix).
+//
+// Usage: import-bundle <path> [-y]
+func (s *Session) importBundle(args []string) error {
+	yes, rest, err := parseYesFlag(args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return errors.New("usage: import-bundle <path> [-y]")
+	}
+	blob, err := os.ReadFile(rest[0])
+	if err != nil {
+		return err
+	}
+
+	pass, err := tty.ReadBundlePassphrase("Source bundle passphrase: ")
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(pass)
+
+	notes, err := bundle.Open(blob, pass)
+	if err != nil {
+		if errors.Is(err, crypto.ErrAuthFailed) {
+			return errors.New("Wrong passphrase, or the bundle is corrupted")
+		}
+		return err
+	}
+
+	// Preview: name + first body line, capped to keep terminal sane.
+	fmt.Fprintf(s.out, "bundle contains %d notes:\n", len(notes))
+	for _, name := range bundle.SortedNames(notes) {
+		n := notes[name]
+		fmt.Fprintf(s.out, "  %-32s %s\n", name, snippetFrom(n.Body))
+	}
+
+	if !yes {
+		ok, err := s.confirm(fmt.Sprintf("import %d notes into this vault? [y/N]: ", len(notes)))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(s.out, "cancelled")
+			return nil
+		}
+	}
+
+	// Convert bundle notes → store notes, then reuse mergeNotes.
+	incoming := store.New()
+	for name, bn := range notes {
+		incoming.Notes[name] = &store.Note{
+			Body:      bn.Body,
+			CreatedAt: bn.CreatedAt,
+			UpdatedAt: bn.UpdatedAt,
+		}
+	}
+	added, conflicts := mergeNotes(s.Vault, incoming)
+	fmt.Fprintf(s.out, "imported: +%d new, %d conflicts renamed (.conflict-YYYYMMDD)\n", added, conflicts)
+	return s.persist()
+}
+
+// parseBundleArgs splits "bundle" arguments into note names, the
+// required -o output path, and a --force flag. Order doesn't matter;
+// flags can appear before or after names.
+func parseBundleArgs(args []string) (names []string, outPath string, force bool, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "-o", "--output":
+			if i+1 >= len(args) {
+				return nil, "", false, errors.New("-o requires a path")
+			}
+			outPath = args[i+1]
+			i++
+		case "-f", "--force":
+			force = true
+		default:
+			if strings.HasPrefix(a, "-") {
+				return nil, "", false, fmt.Errorf("unknown flag: %s", a)
+			}
+			names = append(names, a)
+		}
+	}
+	if len(names) == 0 {
+		return nil, "", false, errors.New("bundle requires at least one note name")
+	}
+	if outPath == "" {
+		return nil, "", false, errors.New("bundle requires -o <path>")
+	}
+	return names, outPath, force, nil
+}
+
+// snippetFrom returns the first non-empty line of body, trimmed and
+// truncated. Used by import-bundle preview to give users a hint
+// without dumping the whole secret.
+func snippetFrom(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" {
+			continue
+		}
+		if len(s) > 80 {
+			s = s[:77] + "..."
+		}
+		return s
+	}
+	return ""
 }
 
 // templateEdit opens the per-vault new-note template in $EDITOR.

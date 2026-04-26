@@ -15,6 +15,8 @@ var commandNames = []string{
 	"passphrase",
 	"export",
 	"import",
+	"bundle",
+	"import-bundle",
 	"help",
 	"exit",
 	"quit",
@@ -25,12 +27,18 @@ var commandNames = []string{
 // is filtered out of the candidate list.
 var templateSubcommands = []string{"show", "reset"}
 
-// noteNameCommands names the commands whose first argument is a note name.
+// noteNameCommands names the commands whose first argument is a note
+// name. `bundle` accepts MULTIPLE note-name arguments, so we still
+// complete on every position past the first token (the wordComplete
+// logic doesn't currently distinguish between commands that take 1
+// vs N note args — for `read` etc the user just won't get useful
+// candidates for trailing positions, which is harmless).
 var noteNameCommands = map[string]bool{
-	"note": true,
-	"read": true,
-	"copy": true,
-	"rm":   true,
+	"note":   true,
+	"read":   true,
+	"copy":   true,
+	"rm":     true,
+	"bundle": true,
 }
 
 // nameLister returns the live set of completable note names. Captured

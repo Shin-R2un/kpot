@@ -45,6 +45,9 @@ Single-shot commands (mirror the REPL):
   recovery-info                show recovery type (no secrets, no params)
   export [-o path] [--force]   print decrypted JSON to stdout (or write to a file)
   import <json> [--mode merge|replace] [-y]
+  bundle <name>... -o <path> [--force]
+                               encrypt selected notes into a portable .kpb file
+  import-bundle <path> [-y]    decrypt a .kpb (asks for source passphrase) and merge
 
 Environment:
   KPOT_PASSPHRASE              if set, used in place of the TTY prompt
@@ -73,7 +76,7 @@ Examples:
   KPOT_PASSPHRASE=secret kpot personal.kpot copy ai/openai
 `
 
-const version = "0.4.0-dev"
+const version = "0.5.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

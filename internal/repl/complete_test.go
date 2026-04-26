@@ -120,6 +120,36 @@ func TestCompleteTemplateSubcommandPrefix(t *testing.T) {
 	}
 }
 
+func TestCompleteBundleAcceptsMultipleNoteArgs(t *testing.T) {
+	// `bundle ai/o<TAB>` should still complete note names because
+	// bundle is in noteNameCommands.
+	line := "bundle ai/o"
+	head, comp, _ := wordComplete(line, len(line), names("ai/openai", "ai/anthropic"))
+	if head != "bundle " {
+		t.Fatalf("head = %q, want 'bundle '", head)
+	}
+	if len(comp) != 1 || comp[0] != "ai/openai" {
+		t.Fatalf("comp = %v, want [ai/openai]", comp)
+	}
+}
+
+func TestCompleteImportBundleIsKnownCommand(t *testing.T) {
+	// Ensure import-bundle shows up when typing 'import' prefix.
+	_, comp, _ := wordComplete("import", 6, names())
+	hasImport, hasBundle := false, false
+	for _, c := range comp {
+		if c == "import " {
+			hasImport = true
+		}
+		if c == "import-bundle " {
+			hasBundle = true
+		}
+	}
+	if !hasImport || !hasBundle {
+		t.Errorf("expected both 'import' and 'import-bundle' in completions, got %v", comp)
+	}
+}
+
 func TestCompleteTemplateNoCompletionPastSubcommand(t *testing.T) {
 	_, comp, _ := wordComplete("template show extra", 19, names("a", "b"))
 	if comp != nil {
