@@ -677,9 +677,19 @@ func (s *Session) importVault(args []string) error {
 	return s.persist()
 }
 
+// maxNoteNameLen mirrors store.NormalizeName's 128-char cap. Conflict
+// names must stay within this so subsequent Get/Put/Delete calls
+// (which all run NormalizeName) don't reject the entry we just stored.
+const maxNoteNameLen = 128
+
 // mergeNotes copies notes from src into dst. Same-key conflicts are
 // preserved under <name>.conflict-<YYYYMMDD>[-N] so the user can
 // resolve them manually later.
+//
+// If the original name is long enough that adding the conflict suffix
+// would exceed maxNoteNameLen, the prefix portion is truncated. Better
+// to truncate readably than to silently produce a name Get can't look
+// up — the user can still read/copy/rm it via the truncated name.
 func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
 	today := time.Now().Format("20060102")
 	for name, n := range src.Notes {
@@ -688,18 +698,53 @@ func mergeNotes(dst, src *store.DecryptedVault) (added, conflicts int) {
 			added++
 			continue
 		}
-		base := name + ".conflict-" + today
+		base := truncatedConflictBase(name, today)
 		target := base
 		for i := 2; ; i++ {
 			if _, exists := dst.Notes[target]; !exists {
 				break
 			}
-			target = fmt.Sprintf("%s-%d", base, i)
+			candidate := fmt.Sprintf("%s-%d", base, i)
+			if len(candidate) > maxNoteNameLen {
+				// Trim base further to fit the -N tail; recompute candidate.
+				suffix := fmt.Sprintf("-%d", i)
+				room := maxNoteNameLen - len(suffix)
+				if room < 1 {
+					room = 1
+				}
+				candidate = base[:min(len(base), room)] + suffix
+			}
+			target = candidate
 		}
 		dst.Notes[target] = n
 		conflicts++
 	}
 	return added, conflicts
+}
+
+// truncatedConflictBase returns "<name>.conflict-<YYYYMMDD>", or — if
+// that would exceed maxNoteNameLen — a name-truncated variant. The
+// suffix is preserved verbatim (so users can grep for it), the prefix
+// is what gets shortened.
+func truncatedConflictBase(name, today string) string {
+	suffix := ".conflict-" + today
+	if len(name)+len(suffix) <= maxNoteNameLen {
+		return name + suffix
+	}
+	room := maxNoteNameLen - len(suffix)
+	if room < 1 {
+		room = 1
+	}
+	return name[:room] + suffix
+}
+
+// min returns the smaller of two ints. Stdlib provides one in Go 1.21+,
+// but we still target 1.18 in go.mod.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // bundle exports the named notes into a self-contained encrypted
@@ -735,7 +780,7 @@ func (s *Session) bundle(args []string) error {
 		canon = append(canon, c)
 	}
 
-	pass, err := tty.ReadPassphrase("Bundle passphrase (recipient will need it): ")
+	pass, err := tty.ReadBundlePassphrase("Bundle passphrase (recipient will need it): ")
 	if err != nil {
 		return err
 	}
@@ -779,7 +824,7 @@ func (s *Session) importBundle(args []string) error {
 		return err
 	}
 
-	pass, err := tty.ReadPassphrase("Source bundle passphrase: ")
+	pass, err := tty.ReadBundlePassphrase("Source bundle passphrase: ")
 	if err != nil {
 		return err
 	}

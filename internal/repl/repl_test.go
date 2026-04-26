@@ -517,7 +517,7 @@ func TestBundleAndImportBundleRoundTrip(t *testing.T) {
 	a.persist()
 
 	bundlePath := filepath.Join(dir, "transfer.kpb")
-	t.Setenv("KPOT_PASSPHRASE", "bundle-pass")
+	t.Setenv(tty.BundlePassphraseEnv, "bundle-pass")
 	tty.ResetEnvWarnForTest()
 
 	// Bundle 2 notes (skip misc/notes).
@@ -573,7 +573,7 @@ func TestBundleRequiresOutputPath(t *testing.T) {
 	defer s.Close()
 	s.Vault.Put("openai", "sk")
 	s.persist()
-	t.Setenv("KPOT_PASSPHRASE", "p")
+	t.Setenv(tty.BundlePassphraseEnv, "p")
 	tty.ResetEnvWarnForTest()
 
 	if _, err := s.dispatch("bundle", []string{"openai"}); err == nil {
@@ -585,7 +585,7 @@ func TestBundleRejectsMissingNote(t *testing.T) {
 	dir := t.TempDir()
 	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
 	defer s.Close()
-	t.Setenv("KPOT_PASSPHRASE", "p")
+	t.Setenv(tty.BundlePassphraseEnv, "p")
 	tty.ResetEnvWarnForTest()
 
 	if _, err := s.dispatch("bundle", []string{"nope", "-o", filepath.Join(dir, "x.kpb")}); err == nil {
@@ -601,7 +601,7 @@ func TestImportBundleWrongPassphrase(t *testing.T) {
 	a.Vault.Put("k", "v")
 	a.persist()
 	bundlePath := filepath.Join(dir, "x.kpb")
-	t.Setenv("KPOT_PASSPHRASE", "bundle-pw")
+	t.Setenv(tty.BundlePassphraseEnv, "bundle-pw")
 	tty.ResetEnvWarnForTest()
 	if _, err := a.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
 		t.Fatal(err)
@@ -610,7 +610,7 @@ func TestImportBundleWrongPassphrase(t *testing.T) {
 	// Try to import with the wrong passphrase by re-setting the env var.
 	b := scriptedSession(t, filepath.Join(dir, "b.kpot"))
 	defer b.Close()
-	t.Setenv("KPOT_PASSPHRASE", "wrong-pw")
+	t.Setenv(tty.BundlePassphraseEnv, "wrong-pw")
 	tty.ResetEnvWarnForTest()
 	withInput(b, "y\n")
 
@@ -628,7 +628,7 @@ func TestImportBundleConflictRenamed(t *testing.T) {
 	a.Vault.Put("ai/openai", "from-a-side")
 	a.persist()
 	bundlePath := filepath.Join(dir, "x.kpb")
-	t.Setenv("KPOT_PASSPHRASE", "p")
+	t.Setenv(tty.BundlePassphraseEnv, "p")
 	tty.ResetEnvWarnForTest()
 	if _, err := a.dispatch("bundle", []string{"ai/openai", "-o", bundlePath}); err != nil {
 		t.Fatal(err)
@@ -670,7 +670,7 @@ func TestBundleRefusesToClobberWithoutForce(t *testing.T) {
 	s.Vault.Put("k", "v")
 	s.persist()
 	bundlePath := filepath.Join(dir, "out.kpb")
-	t.Setenv("KPOT_PASSPHRASE", "p")
+	t.Setenv(tty.BundlePassphraseEnv, "p")
 	tty.ResetEnvWarnForTest()
 
 	if _, err := s.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
@@ -686,6 +686,44 @@ func TestBundleRefusesToClobberWithoutForce(t *testing.T) {
 	}
 }
 
+func TestMergeNotesTruncatesLongConflictNames(t *testing.T) {
+	// Build two vaults with the same long name, then merge — the
+	// conflict suffix would otherwise push the result past 128 chars
+	// and produce a name store.NormalizeName won't accept on lookup.
+	dst := store.New()
+	src := store.New()
+	longName := strings.Repeat("a", 120) // 120 chars; .conflict-YYYYMMDD = 18 → 138 > 128
+	dst.Put(longName, "dst-body")
+	src.Put(longName, "src-body")
+
+	added, conflicts := mergeNotes(dst, src)
+	if added != 0 || conflicts != 1 {
+		t.Fatalf("expected 0 added / 1 conflict, got %d / %d", added, conflicts)
+	}
+
+	// Find the conflict entry. It must be ≤128 chars and reachable
+	// via store.Get (which runs NormalizeName).
+	var conflictName string
+	for n := range dst.Notes {
+		if strings.Contains(n, ".conflict-") {
+			conflictName = n
+		}
+	}
+	if conflictName == "" {
+		t.Fatal("no conflict entry found")
+	}
+	if len(conflictName) > 128 {
+		t.Errorf("conflict name length %d exceeds 128", len(conflictName))
+	}
+	got, ok := dst.Get(conflictName)
+	if !ok {
+		t.Fatalf("conflict entry not retrievable via Get: %q", conflictName)
+	}
+	if got.Body != "src-body" {
+		t.Errorf("conflict body = %q, want src-body", got.Body)
+	}
+}
+
 func TestImportBundleYesFlag(t *testing.T) {
 	dir := t.TempDir()
 	a := scriptedSession(t, filepath.Join(dir, "a.kpot"))
@@ -693,7 +731,7 @@ func TestImportBundleYesFlag(t *testing.T) {
 	a.Vault.Put("k", "v")
 	a.persist()
 	bundlePath := filepath.Join(dir, "x.kpb")
-	t.Setenv("KPOT_PASSPHRASE", "p")
+	t.Setenv(tty.BundlePassphraseEnv, "p")
 	tty.ResetEnvWarnForTest()
 	if _, err := a.dispatch("bundle", []string{"k", "-o", bundlePath}); err != nil {
 		t.Fatal(err)
