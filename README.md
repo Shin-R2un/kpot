@@ -12,29 +12,44 @@ The full design lives in
 
 ## Install
 
-Three options, pick whichever fits your toolchain. All require nothing
-beyond a single binary at runtime.
-
-**1. Prebuilt binary from GitHub Releases** (no Go toolchain needed):
+**One-liner** (Linux / macOS):
 
 ```bash
-# Linux amd64 — pick the matching asset for your OS/arch
-VER=0.5.0
-curl -sSL "https://github.com/Shin-R2un/kpot/releases/download/v${VER}/kpot_${VER}_linux_amd64.tar.gz" \
-  | tar -xz kpot
-sudo install -m 0755 kpot /usr/local/bin/kpot
+curl -sSL https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.sh | bash
 ```
 
-Available targets: linux amd64/arm64, darwin amd64/arm64, windows amd64.
-Browse all assets at <https://github.com/Shin-R2un/kpot/releases/latest>.
+**One-liner** (Windows PowerShell 5+):
 
-**2. `go install`** (Go 1.18+):
+```powershell
+irm https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.ps1 | iex
+```
+
+Both scripts auto-detect OS/arch, fetch the latest release, verify its
+SHA-256 against `checksums.txt`, and place `kpot` (or `kpot.exe`) on
+disk. Defaults: `/usr/local/bin/kpot` on Unix (uses `sudo` if
+needed), `%USERPROFILE%\bin\kpot.exe` on Windows. Override with:
+
+| Variable | Purpose |
+|---|---|
+| `KPOT_VERSION` | Pin to a tag (e.g. `v0.5.0`) instead of latest |
+| `KPOT_INSTALL_DIR` | Install to a custom directory |
+
+If `curl … \| bash` makes you uncomfortable (reasonable for a secret
+manager), pick one of these instead:
+
+**`go install`** (Go 1.18+):
 
 ```bash
 go install github.com/Shin-R2un/kpot/cmd/kpot@latest
 ```
 
-**3. From source**:
+**Manual download** — grab the matching archive from
+<https://github.com/Shin-R2un/kpot/releases/latest>, verify the
+SHA-256 yourself against `checksums.txt`, and drop the binary on
+your `PATH`. Targets: linux amd64/arm64, darwin amd64/arm64,
+windows amd64.
+
+**From source**:
 
 ```bash
 git clone https://github.com/Shin-R2un/kpot && cd kpot
