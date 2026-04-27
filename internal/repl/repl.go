@@ -13,14 +13,14 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/r2un/kpot/internal/bundle"
-	"github.com/r2un/kpot/internal/clipboard"
-	"github.com/r2un/kpot/internal/crypto"
-	"github.com/r2un/kpot/internal/editor"
-	"github.com/r2un/kpot/internal/notefmt"
-	"github.com/r2un/kpot/internal/store"
-	"github.com/r2un/kpot/internal/tty"
-	"github.com/r2un/kpot/internal/vault"
+	"github.com/Shin-R2un/kpot/internal/bundle"
+	"github.com/Shin-R2un/kpot/internal/clipboard"
+	"github.com/Shin-R2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/editor"
+	"github.com/Shin-R2un/kpot/internal/notefmt"
+	"github.com/Shin-R2un/kpot/internal/store"
+	"github.com/Shin-R2un/kpot/internal/tty"
+	"github.com/Shin-R2un/kpot/internal/vault"
 )
 
 type Session struct {

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/r2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/crypto"
 )
 
 // ErrNoRecovery is returned when a recovery-key open is attempted on a

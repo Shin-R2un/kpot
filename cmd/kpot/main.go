@@ -7,15 +7,15 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/r2un/kpot/internal/config"
-	"github.com/r2un/kpot/internal/crypto"
-	"github.com/r2un/kpot/internal/editor"
-	"github.com/r2un/kpot/internal/keychain"
-	"github.com/r2un/kpot/internal/recovery"
-	"github.com/r2un/kpot/internal/repl"
-	"github.com/r2un/kpot/internal/store"
-	"github.com/r2un/kpot/internal/tty"
-	"github.com/r2un/kpot/internal/vault"
+	"github.com/Shin-R2un/kpot/internal/config"
+	"github.com/Shin-R2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/editor"
+	"github.com/Shin-R2un/kpot/internal/keychain"
+	"github.com/Shin-R2un/kpot/internal/recovery"
+	"github.com/Shin-R2un/kpot/internal/repl"
+	"github.com/Shin-R2un/kpot/internal/store"
+	"github.com/Shin-R2un/kpot/internal/tty"
+	"github.com/Shin-R2un/kpot/internal/vault"
 )
 
 const usage = `kpot - encrypted CLI note vault
@@ -76,7 +76,10 @@ Examples:
   KPOT_PASSPHRASE=secret kpot personal.kpot copy ai/openai
 `
 
-const version = "0.5.0-dev"
+// version is the released build version. Overridden at link time by
+// goreleaser via -ldflags "-X main.version=...". Unreleased builds keep
+// the in-tree placeholder so `kpot version` still prints something useful.
+var version = "0.5.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
