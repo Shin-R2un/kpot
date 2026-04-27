@@ -22,8 +22,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/r2un/kpot/internal/crypto"
-	"github.com/r2un/kpot/internal/store"
+	"github.com/Shin-R2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/store"
 )
 
 const (

@@ -2,3 +2,4 @@
 *.kpot
 *.kpot.bak
 *.kpot.tmp
+/dist/

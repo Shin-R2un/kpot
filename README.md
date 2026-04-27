@@ -10,9 +10,34 @@ REPL with `$EDITOR` integration. No daemon, no server, no SaaS.
 The full design lives in
 `/home/shin/.claude/plans/kpot-cli-cuddly-patterson.md`.
 
-## Build
+## Install
+
+Three options, pick whichever fits your toolchain. All require nothing
+beyond a single binary at runtime.
+
+**1. Prebuilt binary from GitHub Releases** (no Go toolchain needed):
 
 ```bash
+# Linux amd64 — pick the matching asset for your OS/arch
+VER=0.5.0
+curl -sSL "https://github.com/Shin-R2un/kpot/releases/download/v${VER}/kpot_${VER}_linux_amd64.tar.gz" \
+  | tar -xz kpot
+sudo install -m 0755 kpot /usr/local/bin/kpot
+```
+
+Available targets: linux amd64/arm64, darwin amd64/arm64, windows amd64.
+Browse all assets at <https://github.com/Shin-R2un/kpot/releases/latest>.
+
+**2. `go install`** (Go 1.18+):
+
+```bash
+go install github.com/Shin-R2un/kpot/cmd/kpot@latest
+```
+
+**3. From source**:
+
+```bash
+git clone https://github.com/Shin-R2un/kpot && cd kpot
 make build      # → ./kpot
 make test       # → go test ./...
 make install    # → $(go env GOPATH)/bin/kpot
@@ -24,8 +49,6 @@ that is:
 ```bash
 go build -o ~/bin/kpot ./cmd/kpot
 ```
-
-Requires Go 1.18+.
 
 ## Quick start
 

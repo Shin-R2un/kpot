@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/r2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/crypto"
 )
 
 func TestCreateOpenRoundTrip(t *testing.T) {

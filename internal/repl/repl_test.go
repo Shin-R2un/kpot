@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/r2un/kpot/internal/clipboard"
-	"github.com/r2un/kpot/internal/crypto"
-	"github.com/r2un/kpot/internal/store"
-	"github.com/r2un/kpot/internal/tty"
-	"github.com/r2un/kpot/internal/vault"
+	"github.com/Shin-R2un/kpot/internal/clipboard"
+	"github.com/Shin-R2un/kpot/internal/crypto"
+	"github.com/Shin-R2un/kpot/internal/store"
+	"github.com/Shin-R2un/kpot/internal/tty"
+	"github.com/Shin-R2un/kpot/internal/vault"
 )
 
 // withInput swaps the session's prompter so confirm() reads from the
