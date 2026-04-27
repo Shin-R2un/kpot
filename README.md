@@ -24,6 +24,13 @@ curl -sSL https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.sh | bas
 irm https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.ps1 | iex
 ```
 
+**Scoop** (Windows, package manager):
+
+```powershell
+scoop bucket add shin-r2un https://github.com/Shin-R2un/scoop-bucket
+scoop install kpot
+```
+
 Both scripts auto-detect OS/arch, fetch the latest release, verify its
 SHA-256 against `checksums.txt`, and place `kpot` (or `kpot.exe`) on
 disk. Defaults: `/usr/local/bin/kpot` on Unix (uses `sudo` if

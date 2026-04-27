@@ -28,3 +28,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # SCOOP_TOKEN is a fine-grained PAT with Contents:write on
+          # Shin-R2un/scoop-bucket. Used by goreleaser's `scoops` block
+          # to publish the kpot manifest after each release.
+          SCOOP_TOKEN: ${{ secrets.SCOOP_TOKEN }}
