@@ -1,7 +1,8 @@
 # kpot ユーザーマニュアル
 
-> **バージョン**: 0.4.0-dev  
-> **最終更新**: 2026-04-26
+> **バージョン**: 0.5.0  
+> **最終更新**: 2026-04-27  
+> **リポジトリ**: https://github.com/Shin-R2un/kpot
 
 ---
 
@@ -15,16 +16,17 @@
    - [REPL モード](#42-repl-モード)
    - [シングルショットモード](#43-シングルショットモード)
    - [REPL コマンド詳細](#44-repl-コマンド詳細)
+   - [keychain サブコマンド](#45-keychain-サブコマンド)
 5. [ノート名のルール](#5-ノート名のルール)
 6. [テンプレートとプレースホルダー](#6-テンプレートとプレースホルダー)
 7. [設定ファイル](#7-設定ファイル)
 8. [環境変数](#8-環境変数)
-9. [ファイルフォーマット](#9-ファイルフォーマット)
-10. [セキュリティ設計](#10-セキュリティ設計)
-11. [リカバリーキー](#11-リカバリーキー)
-12. [OS キーチェーン連携](#12-os-キーチェーン連携)
-13. [アイドルロック](#13-アイドルロック)
-14. [同期について](#14-同期について)
+9. [リカバリーキー](#9-リカバリーキー)
+10. [OS キーチェーン連携](#10-os-キーチェーン連携)
+11. [アイドルロック](#11-アイドルロック)
+12. [バンドル転送 (.kpb)](#12-バンドル転送-kpb)
+13. [ファイルフォーマット](#13-ファイルフォーマット)
+14. [セキュリティ設計](#14-セキュリティ設計)
 15. [実証ログ](#15-実証ログ)
 
 ---
@@ -40,21 +42,33 @@ API キー・パスワード・SSH 接続情報・秘密メモなどをひとつ
 |------|------|
 | 暗号化方式 | Argon2id (64 MiB / 3 / 1) + XChaCha20-Poly1305 |
 | 改ざん検出 | ヘッダー全体を AAD として AEAD で保護 |
+| リカバリーキー | BIP-39 シードフレーズ (12/24語) または Crockford Base32 秘密鍵 |
+| DEK 分離 | v2 vault は DEK をパスフレーズ wrap + recovery wrap で二重保護 |
+| OS キーチェーン | macOS / Linux (secret-tool) / Windows (Credential Manager) 対応 |
 | 原子書き込み | `.tmp` → `.bak` → 本体 の 2-phase rename |
+| アイドルロック | 無操作 N 分でセッション自動ロック (デフォルト 10 分) |
 | ノート編集 | `$EDITOR` 連携、一時ファイルは `/dev/shm` に配置 |
-| TAB 補完 | TTY 接続時はコマンド名・ノート名を補完（liner） |
-| クリップボード | コピー後 30 秒で自動消去（設定変更可） |
+| TAB 補完 | TTY 接続時はコマンド名・ノート名を補完 (liner) |
+| クリップボード | コピー後 30 秒で自動消去 (設定変更可) |
+| バンドル転送 | 選択したノートを `.kpb` ファイルに暗号化して共有 |
 
 ---
 
 ## 2. インストール
 
-### 前提条件
+### ワンライナーインストール (Linux / macOS)
 
-- Go 1.18 以上
-- Linux / macOS / Windows
+```bash
+curl -fsSL https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.sh | sh
+```
 
-### ビルド手順
+### ワンライナーインストール (Windows PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.ps1 | iex
+```
+
+### Go でビルド
 
 ```bash
 git clone https://github.com/Shin-R2un/kpot.git
@@ -64,70 +78,87 @@ make test        # 全テスト実行
 make install     # $(go env GOPATH)/bin/kpot にインストール
 ```
 
+### 動作要件
+
+- Go 1.18 以上 (ビルド時)
+- Linux / macOS / Windows
+- クリップボード: `xclip` または `wl-clipboard` (Linux), `pbcopy` (macOS), PowerShell (Windows)
+- OS キーチェーン (任意): `libsecret-tools` (Linux), macOS 標準, Windows 標準
+
 ---
 
 ## 3. クイックスタート
 
 ```bash
-# 1. 新しい保管庫を作成（パスフレーズを設定）
+# 1. 新しい保管庫を作成 (リカバリーシードが表示される)
 kpot init personal.kpot
 
 # 2. 保管庫を開いて REPL に入る
 kpot personal.kpot
 
 # 3. REPL 内で操作
-kpot:personal> note ai/openai    # $EDITOR でノートを作成・編集
-kpot:personal> ls                # ノート一覧
-kpot:personal> read ai/openai   # ノートを表示
-kpot:personal> copy ai/openai   # クリップボードにコピー（30秒で自動消去）
-kpot:personal> find openai      # 名前・本文でキーワード検索
-kpot:personal> rm ai/openai     # ノートを削除（確認あり）
-kpot:personal> help             # コマンド一覧
-kpot:personal> exit             # 終了
+kpot:personal> note ai/openai      # $EDITOR でノートを作成・編集
+kpot:personal> ls                  # ノート一覧
+kpot:personal> read ai/openai      # ノートを表示
+kpot:personal> copy ai/openai      # クリップボードにコピー (30秒で自動消去)
+kpot:personal> find openai         # 検索
+kpot:personal> rm ai/openai        # 削除 (確認あり)
+kpot:personal> exit
 ```
 
 ---
 
 ## 4. コマンドリファレンス
 
-### 4.1 `init`
+### 4.1 init
 
 ```
-kpot init <file>
+kpot init <file> [--recovery seed|key] [--recovery-words 12|24]
 ```
 
-新しい保管庫ファイルを作成します。パスフレーズを 2 回入力して確認します。
+新しい暗号化保管庫を作成します。**v0.3 以降は常にリカバリーキーが生成されます。**
 
-- 既存ファイルへの上書きは拒否されます
-- **パスフレーズを忘れると復元は不可能です**
+| オプション | 説明 | デフォルト |
+|-----------|------|----------|
+| `--recovery seed` | BIP-39 ニーモニックシードフレーズを生成 | ✓ デフォルト |
+| `--recovery key` | Crockford Base32 秘密鍵を生成 | — |
+| `--recovery-words 12` | 12語のシード (128bit エントロピー) | ✓ デフォルト |
+| `--recovery-words 24` | 24語のシード (256bit エントロピー) | — |
 
 ```bash
-$ kpot init personal.kpot
-New passphrase: ********
-Repeat passphrase: ********
-Created personal.kpot
-Keep this passphrase safe — there is no recovery if you lose it.
+# デフォルト (12語シード)
+kpot init personal.kpot
+
+# 24語シード
+kpot init personal.kpot --recovery seed --recovery-words 24
+
+# 秘密鍵形式
+kpot init personal.kpot --recovery key
 ```
+
+> ⚠️ **リカバリーキーは init 時に一度だけ表示されます。必ず紙に書き留めてください。**  
+> 紛失した場合、パスフレーズを忘れると vault は復元不能になります。
 
 ---
 
 ### 4.2 REPL モード
 
 ```
-kpot <file>
+kpot <file> [--recover] [--no-cache] [--forget]
 ```
 
-保管庫を開いて対話型シェル（REPL）に入ります。
+インタラクティブなシェルに入ります。
 
-- TTY 接続時: **TAB 補完**（コマンド名・ノート名）と**矢印キー履歴**が使用可能
-- Ctrl-C: 入力中の行を破棄してプロンプトに戻る（REPL 終了にはならない）
-- Ctrl-D / `exit`: 保管庫を閉じて終了
+| オプション | 説明 |
+|-----------|------|
+| `--recover` | リカバリーキーでパスフレーズなしに開く |
+| `--no-cache` | OS キーチェーンキャッシュを使わない |
+| `--forget` | キャッシュされたキーを削除してから開く |
 
-```
-kpot:personal> [TAB]
-copy       exit       export     find       help       import
-ls         note       passphrase quit       read       rm
-template
+```bash
+kpot personal.kpot            # 通常起動
+kpot personal.kpot --recover  # リカバリーキーで起動
+kpot personal.kpot --no-cache # キャッシュ無効
 ```
 
 ---
@@ -138,42 +169,21 @@ template
 kpot <file> <command> [args...]
 ```
 
-REPL を開かずに 1 コマンドだけ実行します。スクリプトや他ツールとの連携に便利です。
+REPL に入らず、コマンドを 1 回だけ実行します。スクリプトや CI 向けです。
 
 ```bash
-# ノート一覧
 kpot personal.kpot ls
-
-# ノートを読む
 kpot personal.kpot read ai/openai
-
-# クリップボードにコピー
-kpot personal.kpot copy ai/openai
-
-# 検索
-kpot personal.kpot find ssh
-
-# 削除（確認スキップ）
 kpot personal.kpot rm -y old/key
-
-# JSON でエクスポート（stdout）
-kpot personal.kpot export
-
-# パスフレーズ変更
-kpot personal.kpot passphrase
+kpot personal.kpot export -o backup.json --force
 ```
 
 ---
 
 ### 4.4 REPL コマンド詳細
 
-#### `ls` — ノート一覧
-
-```
-ls
-```
-
-保管庫内のすべてのノート名をアルファベット順で表示します。
+#### `ls`
+ノート一覧を表示します。
 
 ```
 kpot:personal> ls
@@ -184,87 +194,29 @@ server/fw0
 
 ---
 
-#### `note` — ノートの作成・編集
-
-```
-note <name>
-```
-
-`$EDITOR` を起動してノートを作成または編集します。
-
-- **新規作成時**: テンプレートと作成日時のフロントマターが挿入されます
-- **編集時**: 既存の本文の上に、作成日時・更新日時の両方を含むフロントマターが再生成されます（毎回 JSON メタデータから取り直されるため、編集中の表示は常に最新）
-- フロントマター（`---` で囲まれた部分）は保存時に自動的に除去されます
-- 本文が空またはテンプレート未変更の場合は保存されません
+#### `note <name>`
+ノートを `$EDITOR` で作成・編集します。  
+テンプレートが適用され、フロントマター (作成日・更新日) が自動付与されます。
 
 ```
 kpot:personal> note ai/openai
 ```
 
-エディタに表示される内容（例）:
-
-```markdown
----
-created: 2026-04-25T12:00:00+09:00
-updated: 2026-04-25T12:00:00+09:00
 ---
 
-# ai/openai
-
-- id:
-- url:
-- password:
-- api_key:
-
-## memo
-```
-
-保存後のノート本文（フロントマターは除去）:
-
-```
-# ai/openai
-
-- id:
-- url: https://platform.openai.com
-- password:
-- api_key: sk-xxxxxxxxxxxx
-
-## memo
-2026-04-25 発行
-```
-
----
-
-#### `read` — ノートの表示
-
-```
-read <name>
-```
-
-ノートの本文を標準出力に表示します。
+#### `read <name>`
+ノートの本文を表示します。
 
 ```
 kpot:personal> read ai/openai
-# ai/openai
-
-- api_key: sk-xxxxxxxxxxxx
-...
+OPENAI_API_KEY=sk-...
 ```
 
 ---
 
-#### `copy` — クリップボードへコピー
-
-```
-copy <name>
-```
-
-ノートの本文をシステムクリップボードにコピーし、設定された時間（デフォルト 30 秒）後に自動消去します。
-
-- ユーザーが別のものをコピーした場合は自動消去しません
-- Linux: `wl-copy`（Wayland）/ `xclip` / `xsel` を自動検出
-- macOS: `pbcopy`
-- Windows: PowerShell
+#### `copy <name>`
+ノート本文をクリップボードにコピーします。  
+デフォルト 30 秒後に自動消去されます (設定変更可)。
 
 ```
 kpot:personal> copy ai/openai
@@ -273,134 +225,138 @@ copied ai/openai via xclip (auto-clears in 30s)
 
 ---
 
-#### `find` — 検索
+#### `find <query>`
+ノート名・本文を大文字小文字を区別せずに検索します。
 
 ```
-find <query>
-```
-
-ノート名と本文をケースインセンシティブで検索します。
-
-```
-kpot:personal> find openai
-ai/openai                        (name+body)  OPENAI_API_KEY=sk-xxx...
-```
-
-| タグ | 意味 |
-|------|------|
-| `(name)` | ノート名にのみマッチ |
-| `(body)` | 本文にのみマッチ |
-| `(name+body)` | 両方にマッチ |
-
----
-
-#### `rm` — ノートの削除
-
-```
-rm [-y|--yes] <name>
-```
-
-ノートを削除します。`-y` を指定しない場合は確認プロンプトが表示されます。
-
-```
-kpot:personal> rm server/old
-remove note "server/old"? [y/N]: y
-removed server/old
-
-kpot:personal> rm -y server/old2
-removed server/old2
+kpot:personal> find api
+ai/openai   (body)  OPENAI_API_KEY=sk-...
 ```
 
 ---
 
-#### `template` — テンプレート管理
+#### `rm [-y] <name>`
+ノートを削除します。`-y` で確認をスキップします。
 
-新規ノート作成時に挿入されるテンプレートを管理します。
-
-| コマンド | 説明 |
-|----------|------|
-| `template` | テンプレートを `$EDITOR` で編集して保存 |
-| `template show` | 現在のテンプレートを表示 |
-| `template reset` | 組み込みデフォルトに戻す |
-
-テンプレートは保管庫ファイル内に暗号化されて保存されるため、保管庫ごとに異なるテンプレートを持てます。
+```
+kpot:personal> rm ai/openai
+remove ai/openai? [y/N]: y
+removed ai/openai
+```
 
 ---
 
-#### `passphrase` — パスフレーズ変更
-
-```
-passphrase
-```
-
-保管庫のパスフレーズを変更します。
-
-- 新しい salt で鍵を再導出し、ファイルを再暗号化します
-- **`.bak` ファイルを削除します**（旧パスフレーズのバックアップを残さないため）
+#### `passphrase`
+パスフレーズを変更します。  
+v2 vault では DEK は保持され、リカバリーキーは引き続き有効です。
 
 ```
 kpot:personal> passphrase
-New passphrase: ********
-Repeat: ********
+New passphrase: 
+Repeat: 
 passphrase changed; previous .bak removed
 ```
 
-> ⚠️ `KPOT_PASSPHRASE` 環境変数が設定されている場合、新旧両プロンプトに同じ値が使われます。TTY で直接実行することを推奨します。
+---
+
+#### `recovery-info`
+リカバリーキーの種別を表示します (シークレットは表示しません)。
+
+```
+kpot:personal> recovery-info
+Recovery: seed-bip39 (12 words)
+```
 
 ---
 
-#### `export` — JSON エクスポート
+#### `template` / `template show` / `template reset`
+新規ノートのテンプレートを管理します。
 
 ```
-export [-o <path>] [--force]
+kpot:personal> template show      # 現在のテンプレートを表示
+kpot:personal> template           # $EDITOR でテンプレートを編集
+kpot:personal> template reset     # 組み込みデフォルトに戻す
 ```
 
-保管庫の全ノートを**平文 JSON** として出力します。
+---
+
+#### `export [-o <path>] [--force]`
+復号した vault の内容を JSON で出力します。  
+デフォルトは stdout。ファイルに書き出す場合は `--force` が必要です。
+
+```
+kpot:personal> export
+kpot:personal> export -o backup.json --force
+```
+
+> ⚠️ ファイルに書き出した場合、平文 JSON がディスクに残ります。使用後は削除してください。
+
+---
+
+#### `import <file> [--mode merge|replace] [-y]`
+JSON ファイルからノートをインポートします。
 
 | オプション | 説明 |
 |-----------|------|
-| （省略） | stdout に出力 |
-| `-o <path>` | ファイルに書き込む |
-| `--force` | 既存ファイルへの上書きを許可 |
+| `--mode merge` | 既存ノートを保持し、新規ノートを追加 (デフォルト) |
+| `--mode replace` | 全ノートを置き換え |
+| `-y` | 確認をスキップ |
 
-> ⚠️ 出力は暗号化されていません。ファイルに書き込んだ場合は使用後に削除してください。
+衝突したノートは `.conflict-YYYYMMDD` サフィックスで保存されます。
 
-```bash
-# stdout に出力（他コマンドへのパイプに便利）
-kpot personal.kpot export | jq '.notes | keys'
-
-# ファイルに書き込み
-kpot personal.kpot export -o backup.json
-
-# 既存ファイルを上書き
-kpot personal.kpot export -o backup.json --force
+```
+kpot:personal> import backup.json --mode merge
+kpot:personal> import backup.json --mode replace -y
 ```
 
 ---
 
-#### `import` — JSON インポート
+#### `bundle <name>... -o <path> [--force]`
+選択したノートを暗号化 `.kpb` ファイルにエクスポートします。  
+別パスフレーズで保護するため、受信者は元の vault のパスフレーズを知らなくても構いません。
 
 ```
-import <json-file> [--mode merge|replace] [-y|--yes]
+kpot:personal> bundle ai/openai server/fw0 -o transfer.kpb
+Bundle passphrase (recipient will need it): 
+wrote 2 notes to transfer.kpb
+note: share the passphrase via a separate channel
 ```
 
-`export` で出力した JSON ファイルからノートを読み込みます。
+---
 
-| オプション | デフォルト | 説明 |
-|-----------|-----------|------|
-| `--mode merge` | ✅ | 新規ノートを追加。既存ノートとの衝突は `.conflict-YYYYMMDD` に保存 |
-| `--mode replace` | | 既存ノートをすべて置換（要確認または `-y`） |
-| `-y` / `--yes` | | 確認プロンプトをスキップ |
+#### `import-bundle <path> [-y]`
+`.kpb` ファイルを復号して現在の vault にマージします。
+
+```
+kpot:personal> import-bundle transfer.kpb
+Source bundle passphrase: 
+bundle contains 2 notes:
+  ai/openai   OPENAI_API_KEY=sk-...
+  server/fw0  Host: example.com
+import 2 notes into this vault? [y/N]: y
+imported: +2 new, 0 conflicts renamed (.conflict-YYYYMMDD)
+```
+
+---
+
+#### `exit` / `quit` / `q`
+REPL を終了します。
+
+---
+
+### 4.5 keychain サブコマンド
+
+```
+kpot keychain test    # バックエンドの診断情報を表示
+kpot keychain forget <file>  # 指定 vault のキャッシュを削除
+```
 
 ```bash
-# マージ（安全、衝突は別名で保存）
-kpot personal.kpot import backup.json
-
-# 全置換（確認あり）
-kpot personal.kpot import backup.json --mode replace
-
-# 全置換（確認スキップ）
-kpot personal.kpot import backup.json --mode replace -y
+$ kpot keychain test
+backend: linux-secret-tool
+available: false
+config mode: auto
+hint: install libsecret-tools and ensure DBUS_SESSION_BUS_ADDRESS is set
 ```
 
 ---
@@ -408,378 +364,437 @@ kpot personal.kpot import backup.json --mode replace -y
 ## 5. ノート名のルール
 
 | ルール | 詳細 |
-|--------|------|
-| 使用可能文字 | `a-z`, `0-9`, `-`, `_`, `.`, `/` |
+|-------|------|
+| 使用可能文字 | `a-z 0-9 . - _ /` (ASCII のみ) |
 | 大文字 | 自動的に小文字に変換 |
-| 最大長 | 128 文字 |
-| 階層区切り | `/`（例: `ai/openai`, `server/fw0`） |
-| 禁止パターン | 先頭・末尾の `/`、連続した `//` |
+| 長さ | 1〜128 文字 |
+| `/` | ディレクトリ区切りとして使用可能 |
+| 先頭・末尾の `/` | 不可 |
+| 連続した `//` | 不可 |
 
 ```bash
 # 有効な名前
 ai/openai
-server/fw0.example
-my-secret_key.prod
+server/prod/db
+my-secret_key.v2
 
-# 無効な名前
-/leading-slash    # 先頭スラッシュ
-trailing/         # 末尾スラッシュ
-a//b              # 連続スラッシュ
-has space         # スペース
+# 無効な名前 (エラーになる)
+/leading-slash
+trailing/slash/
+double//slash
+UPPERCASE         # → uppercase に自動変換
 ```
 
 ---
 
 ## 6. テンプレートとプレースホルダー
 
-新規ノート作成時、テンプレートに以下のプレースホルダーを埋め込めます。  
-プレースホルダーは**ノート作成時に一度だけ展開**されます（編集時には再展開されません）。
+新規ノート作成時に適用されるテンプレートをカスタマイズできます。
 
-| プレースホルダー | 展開される値 |
-|----------------|-------------|
-| `{{name}}` | ノートの完全な名前（例: `ai/openai`） |
-| `{{basename}}` | 最後の `/` 以降（例: `openai`） |
-| `{{date}}` | 作成日（例: `2026-04-25`） |
-| `{{time}}` | 作成時刻（例: `14:30`） |
-| `{{datetime}}` | ISO 8601 形式（例: `2026-04-25T14:30:00+09:00`） |
-
-**テンプレート例**:
+### 組み込みデフォルトテンプレート
 
 ```markdown
-# {{basename}}
+# {{name}}
 
+- id:
 - url:
-- username:
 - password:
-- created: {{date}}
+- api_key:
 
 ## memo
+
 ```
+
+### サポートされるプレースホルダー
+
+| プレースホルダー | 展開内容 |
+|----------------|---------|
+| `{{name}}` | ノートのフルパス名 (例: `ai/openai`) |
+| `{{basename}}` | 最終セグメント (例: `openai`) |
+| `{{date}}` | 今日の日付 (例: `2026-04-27`) |
+| `{{time}}` | 現在時刻 (例: `14:30:00`) |
+| `{{datetime}}` | 日時 (例: `2026-04-27 14:30:00`) |
+
+### テンプレートのカスタマイズ
+
+```
+kpot:personal> template
+```
+
+`$EDITOR` が開き、テンプレートを編集できます。保存すると vault に保存されます。
 
 ---
 
 ## 7. 設定ファイル
 
-`~/.config/kpot/config.toml`（存在しない場合はデフォルト値を使用）
+`~/.config/kpot/config.toml` に設定を記述できます。
 
 ```toml
-# $EDITOR / $VISUAL より優先されるエディタ
+# 使用するエディタ ($EDITOR より優先される)
 editor = "vim"
 
-# クリップボードの自動消去秒数（デフォルト: 30）
+# クリップボード自動消去までの秒数 (デフォルト: 30)
 clipboard_clear_seconds = 60
 
-# OS キーチェーンに鍵をキャッシュするポリシー
-#   "auto"   : 初回 unlock 時に [Y/n] 確認 (デフォルト)
-#   "always" : 確認なしで毎回キャッシュ
-#   "never"  : 完全に無効化
+# OS キーチェーン動作 ("auto" | "always" | "never", デフォルト: "auto")
 keychain = "auto"
 
-# REPL アイドルロックの分数 (デフォルト: 10)
-# REPL でこの分数の間入力がないと自動的に vault を閉じてプロセス終了
-idle_lock_minutes = 10
+# アイドルロックまでの分数 (デフォルト: 10)
+idle_lock_minutes = 15
 ```
-
-| キー | デフォルト | 説明 |
-|------|-----------|------|
-| `editor` | `""` | エディタコマンド。空の場合は `$EDITOR` → `$VISUAL` → `nano/vim/vi` の順にフォールバック |
-| `clipboard_clear_seconds` | `30` | 0 はデフォルト値（30秒）を使用。負の値はエラー |
-| `keychain` | `"auto"` | OS キーチェーンに鍵をキャッシュするポリシー。`auto` / `always` / `never` 以外はエラー |
-| `idle_lock_minutes` | `10` | REPL のアイドルロック分数。0 はデフォルト値 (10) を使用。負の値はエラー |
 
 ---
 
 ## 8. 環境変数
 
-| 変数 | 説明 |
-|------|------|
-| `KPOT_PASSPHRASE` | TTY プロンプトの代わりにパスフレーズとして使用される。設定時は毎回 stderr に警告が表示される（1プロセスにつき1回） |
-| `EDITOR` | 使用するエディタ（設定ファイルの `editor` より低優先） |
-| `VISUAL` | `EDITOR` が未設定の場合に使用 |
+| 変数名 | 説明 |
+|--------|------|
+| `KPOT_PASSPHRASE` | パスフレーズを直接指定 (非推奨・CI 用途のみ) |
+| `KPOT_BUNDLE_PASSPHRASE` | bundle/import-bundle のパスフレーズを指定 |
+| `EDITOR` | ノート編集に使用するエディタ |
+| `VISUAL` | `EDITOR` のフォールバック |
 
-> ⚠️ `KPOT_PASSPHRASE` は本番環境での常時設定は推奨しません。シェル履歴や環境変数リストからパスフレーズが漏洩するリスクがあります。
+> ⚠️ `KPOT_PASSPHRASE` と `KPOT_BUNDLE_PASSPHRASE` は**意図的に分離**されています。  
+> vault 開錠用のパスフレーズがバンドルパスフレーズに混入するのを防ぐためです。
 
 ---
 
-## 9. ファイルフォーマット
+## 9. リカバリーキー
 
-`.kpot` ファイルは JSON 形式です。
+v0.3 以降の vault はすべてリカバリーキーを持ちます。  
+パスフレーズを忘れた場合でも、リカバリーキーがあれば vault を開けます。
+
+### 種類
+
+#### BIP-39 シードフレーズ (デフォルト)
+
+```
+ 1. abandon      2. ability      3. able         4. about
+ 5. above        6. absent       7. absorb        8. abstract
+ 9. absurd      10. abuse       11. access       12. accident
+```
+
+- 12語 (128bit) または 24語 (256bit) のニーモニック
+- 業界標準の BIP-39 形式
+- オフラインで保管 (金庫・紙など)
+
+#### Crockford Base32 秘密鍵
+
+```
+AAAAAAAA-BBBBBBBB-CCCCCCCC-DDDDDDDD-EEEEEEEE-FFFFFFF0-GGGGGGGG
+```
+
+- 32バイト (256bit) のランダムシークレット
+- O→0, I→1, L→1 の誤字自動修正 (Crockford 仕様)
+- 8文字区切りで読み上げ・手書きしやすい
+
+### リカバリーキーで vault を開く
+
+```bash
+kpot personal.kpot --recover
+Enter recovery seed (or secret key): abandon ability able ...
+```
+
+### セキュリティ特性
+
+- リカバリーキーは **init 時に一度だけ `/dev/tty` に表示**され、ログに残りません
+- パスフレーズを変更 (`passphrase`) してもリカバリーキーは**引き続き有効**です
+- DEK (Data Encryption Key) が分離されているため、パスフレーズ変更時に DEK は変わりません
+
+---
+
+## 10. OS キーチェーン連携
+
+一度パスフレーズを入力すると、OS のネイティブシークレットストアに vault の開錠キーをキャッシュします。  
+次回以降はパスフレーズ入力・Argon2id 計算をスキップして高速に開けます。
+
+### 対応バックエンド
+
+| OS | バックエンド | 必要条件 |
+|----|------------|---------|
+| macOS | Apple Security Services | 標準搭載 |
+| Linux | GNOME Secret Service (secret-tool) | `libsecret-tools` + D-Bus セッション |
+| Windows | Windows Credential Manager | 標準搭載 |
+
+### Linux でのセットアップ
+
+```bash
+# Ubuntu / Debian
+sudo apt install libsecret-tools
+
+# Fedora / RHEL
+sudo dnf install libsecret
+
+# Arch
+sudo pacman -S libsecret
+```
+
+### キャッシュ管理
+
+```bash
+kpot keychain test                    # 動作確認
+kpot personal.kpot --forget           # キャッシュ削除
+kpot personal.kpot --no-cache         # キャッシュを使わずに開く
+```
+
+### 設定
+
+```toml
+# config.toml
+keychain = "auto"    # 初回だけ確認 (デフォルト)
+keychain = "always"  # 常にキャッシュ
+keychain = "never"   # キャッシュしない
+```
+
+---
+
+## 11. アイドルロック
+
+REPL セッションで一定時間操作がないと自動的にセッションを終了します。
+
+- **デフォルト**: 10 分
+- タイムアウト時にキーマテリアルを消去して終了します
+- コマンドを実行するたびにタイマーがリセットされます
+- 非 TTY 環境 (パイプ等) では発動しません
+
+### 設定
+
+```toml
+# config.toml
+idle_lock_minutes = 5   # 5分でロック
+idle_lock_minutes = 0   # デフォルト (10分)
+```
+
+---
+
+## 12. バンドル転送 (.kpb)
+
+選択したノートだけを暗号化した `.kpb` (kpot bundle) ファイルに書き出し、別の vault へ安全に転送できます。
+
+### 用途
+
+- チームメンバーへの認証情報共有
+- 別の vault への選択的なコピー
+- バックアップの一部を切り出して共有
+
+### 仕組み
+
+```
+bundle passphrase
+    ↓ Argon2id
+    KEK (Key Encryption Key)
+    ↓ XChaCha20-Poly1305
+    BEK (Bundle Encryption Key)  ← wrapped_bek フィールドに格納
+    ↓ XChaCha20-Poly1305
+    Payload (notes JSON)
+```
+
+### バンドル作成
+
+```bash
+# REPL から
+kpot:personal> bundle ai/openai server/fw0 -o transfer.kpb
+
+# シングルショット
+kpot personal.kpot bundle ai/openai server/fw0 -o transfer.kpb
+```
+
+### バンドルのインポート
+
+```bash
+# REPL から
+kpot:work> import-bundle transfer.kpb
+
+# シングルショット
+kpot work.kpot import-bundle transfer.kpb -y
+```
+
+### 注意
+
+- バンドルパスフレーズは受信者に別チャネルで伝えてください
+- `KPOT_BUNDLE_PASSPHRASE` 環境変数でバイパス可能 (CI 用途)
+- 同名ノートは `.conflict-YYYYMMDD` にリネームされ、**上書きされません**
+
+---
+
+## 13. ファイルフォーマット
+
+### vault ファイル (.kpot)
 
 ```json
 {
   "format": "kpot",
-  "version": 1,
-  "kdf": {
-    "name": "argon2id",
-    "salt": "<base64, 16 bytes>",
-    "params": {
-      "memory_kib": 65536,
-      "iterations": 3,
-      "parallelism": 1
-    }
+  "version": 2,
+  "passphrase_wrap": {
+    "kind": "passphrase",
+    "kdf": {
+      "name": "argon2id",
+      "salt": "<base64>",
+      "params": { "memory_kib": 65536, "iterations": 3, "parallelism": 1 }
+    },
+    "nonce": "<base64 24B>",
+    "wrapped_dek": "<base64>"
+  },
+  "recovery_wrap": {
+    "kind": "seed-bip39",
+    "kdf": { "name": "pbkdf2-sha512", "iterations": 2048 },
+    "nonce": "<base64 24B>",
+    "wrapped_dek": "<base64>"
   },
   "cipher": {
     "name": "xchacha20-poly1305",
-    "nonce": "<base64, 24 bytes>"
+    "nonce": "<base64 24B>"
   },
-  "payload": "<base64 ciphertext>"
+  "payload": "<base64 ciphertext + 16B Poly1305 tag>"
 }
 ```
 
-`payload` を復号すると以下の構造の JSON が現れます：
+### v1 vault (旧形式・後方互換)
+
+v0.1/v0.2 で作成した vault はそのまま使えます。  
+DEK は KDF 鍵と同一です (リカバリーキーなし)。
+
+### プレーンテキスト (復号後)
 
 ```json
 {
   "version": 1,
-  "created_at": "2026-04-25T12:00:00Z",
-  "updated_at": "2026-04-25T12:00:00Z",
-  "template": "<任意：per-vault な新規ノートテンプレ。未設定なら省略>",
+  "created_at": "2026-04-27T00:00:00Z",
+  "updated_at": "2026-04-27T12:00:00Z",
+  "template": "",
   "notes": {
     "ai/openai": {
-      "body": "...",
-      "created_at": "...",
-      "updated_at": "..."
+      "body": "OPENAI_API_KEY=sk-...",
+      "created_at": "2026-04-27T00:00:00Z",
+      "updated_at": "2026-04-27T12:00:00Z"
     }
   }
 }
 ```
 
-`template` フィールドは `template` コマンドで設定された場合のみ含まれ、保管庫ファイルごと（ヘッダー外）に暗号化されて保管されます。
+### バンドルファイル (.kpb)
 
-### ファイルの世代管理
+```json
+{
+  "format": "kpot-bundle",
+  "version": 1,
+  "kdf": { "name": "argon2id", "salt": "<base64>", "params": { ... } },
+  "wrap_nonce": "<base64>",
+  "wrapped_bek": "<base64>",
+  "cipher": { "name": "xchacha20-poly1305" },
+  "nonce": "<base64>",
+  "payload": "<base64>"
+}
+```
 
-保存のたびに以下の手順で原子的に書き込まれます：
+---
+
+## 14. セキュリティ設計
+
+### 暗号プリミティブ
+
+| 用途 | アルゴリズム | パラメータ |
+|------|------------|----------|
+| パスフレーズ → KEK | Argon2id | m=64MiB, t=3, p=1 |
+| シードフレーズ → KEK | PBKDF2-HMAC-SHA512 | 2048回 |
+| 秘密鍵 → KEK | HKDF-SHA256 | — |
+| DEK 暗号化 (wrap) | XChaCha20-Poly1305 | 24B nonce |
+| ペイロード暗号化 | XChaCha20-Poly1305 | 24B nonce |
+| ナンス生成 | crypto/rand | — |
+
+### AAD (追加認証データ)
+
+ヘッダー全体 (KDF パラメータ・ nonce を含む) が AAD として使われます。  
+KDF パラメータのダウングレード・ヘッダーの差し替えは AEAD の認証タグ検証で検出されます。
+
+### キーマテリアルの保護
+
+- 一時ファイルは `/dev/shm` (Linux) または OS 標準テンポラリに配置
+- セッション終了時に `crypto.Zero()` でメモリを上書き
+- パスフレーズ入力時は `term.ReadPassword` でエコーを抑制
+- リカバリーキー表示は `/dev/tty` (Unix) / `os.Stdout` (Windows) に直接書き込み
+
+### 耐改ざん性
 
 ```
-1. <file>.tmp を書き込み → fsync
-2. <file> → <file>.bak にリネーム（存在する場合）
+改ざん箇所      → 検出方法
+----------------------------------------------------
+KDF params      → Validate() 最小値チェック + AAD 不一致
+payload         → Poly1305 タグ検証失敗 (ErrAuthFailed)
+nonce           → AAD 不一致 → Poly1305 タグ検証失敗
+wrapped_dek     → AEAD 認証失敗 (ErrAuthFailed)
+recovery_wrap   → WrapAAD 不一致 → AEAD 認証失敗
+```
+
+### 原子書き込み
+
+```
+1. <file>.tmp に書き込み + fsync
+2. <file> → <file>.bak にリネーム
 3. <file>.tmp → <file> にリネーム
 4. ディレクトリを fsync
 ```
 
-クラッシュが起きても `<file>` か `<file>.bak` のどちらかが必ず残ります。
+クラッシュ後も `<file>` または `<file>.bak` のどちらかは必ず残り、復元できます。
 
----
+### 既知の制限
 
-## 10. セキュリティ設計
-
-### 暗号化
-
-| 要素 | 仕様 |
+| 項目 | 詳細 |
 |------|------|
-| KDF | Argon2id — 64 MiB メモリ、3 反復、並列度 1 |
-| 暗号 | XChaCha20-Poly1305（24 バイトノンス、書き込みごとに新規生成） |
-| 鍵長 | 32 バイト |
-| 塩長 | 16 バイト（`crypto/rand`） |
-| AAD | KDF セクションと暗号セクションを含む JSON ヘッダー |
-
-### 改ざん検出
-
-ヘッダー全体（KDF パラメータ・salt・cipher 名・nonce）が AEAD の AAD として暗号文に束縛されます。  
-KDF パラメータの変更（ダウングレード攻撃）や salt の入れ替えは復号時に `ErrAuthFailed` となります。
-
-### メモリ保護
-
-- パスフレーズ・鍵・平文はスコープ終了時に `crypto.Zero()` でゼロ埋め（ベストエフォート — Go の GC が `[]byte` を内部で move する可能性があるため完全な拭き取りは保証されない）
-- `mlock` による swap 抑止は **未実装**。同一権限で動く悪意あるプロセスからのメモリ読取・物理的にディスクへ swap される攻撃は脅威モデル外
-- エディタ一時ファイルは Linux では `/dev/shm`（tmpfs）に配置
-- 一時ファイルはゼロ埋めしてから `unlink`
-- パスフレーズ比較は `crypto/subtle.ConstantTimeCompare` でタイミング攻撃を防止
-
-### クリップボード
-
-- コピー後に設定時間（デフォルト 30 秒）でクリア
-- ユーザーが別のものをコピーした場合はクリアしない（上書きを避ける）
-- セッション終了時（`Close()`）に即時クリア
-
----
-
-## 11. リカバリーキー
-
-v0.3 以降の `kpot init` は **必ずリカバリーキーを発行**し、initの実行直後に1度だけ画面表示します。再発行できないので、その場で紙やオフライン媒体にメモしてください。
-
-```
-kpot init personal.kpot
-                  → 12-word seed (BIP-39, default)
-kpot init personal.kpot --recovery key
-                  → 32-byte secret key (Crockford Base32 表記)
-kpot init personal.kpot --recovery seed --recovery-words 24
-                  → 24-word seed (256-bit)
-```
-
-| flag | 結果 | 用途 |
-|---|---|---|
-| (省略) | BIP-39 12-word seed | 紙メモ向き |
-| `--recovery seed --recovery-words 24` | BIP-39 24-word seed | より強い entropy |
-| `--recovery key` | 32-byte secret key (52字 base32) | パスマネ paste 向き |
-
-設計上の制約:
-- **再発行不可**: 一度発行されたら永久に固定。漏れたら新しい vault を作って `export → import` で移行
-- **Vault 寿命中固定**: passphrase を rotate しても recovery は変わらない (DEK 不変設計)
-- **TTY 必須**: stdin/stdout が pipe/redirect だと init は実行を拒否し vault 作成も rollback。CI ログに seed が漏れない
-
-復旧フロー:
-```
-kpot personal.kpot --recover
-  → recovery key prompt → unlock → REPL に入る
-kpot:personal> passphrase
-  → 新パスフレーズ設定 (recovery key は保持)
-kpot:personal> exit
-```
-
-種類確認:
-```
-kpot personal.kpot recovery-info
-  → "Recovery: enabled (type: seed-bip39)" など (KDF params は表示しない)
-```
-
-セキュリティ:
-- 表示は `/dev/tty` 直書き。stderr/stdout には**書かない**ので tmux scrollback / log capture / CI artifact に残らない
-- 表示後 ENTER 待機 → ANSI clear-screen
-- 誤 recovery 入力 vs 改ざんは同一エラー文 (情報漏洩防止)
-
----
-
-## 12. OS キーチェーン連携
-
-v0.4 以降、初回の vault unlock 時に「キャッシュしますか? [Y/n]」と聞かれます。Y を選ぶと OS-native のシークレットストアに**鍵を保存**し、以降の `kpot <file>` は passphrase prompt と Argon2id 派生 (~100ms) を skip します。
-
-```
-kpot personal.kpot
-Passphrase: ********
-Cache key in OS keychain so future opens skip the passphrase? [Y/n]: y
-Opened personal.kpot
-
-# 次回以降:
-kpot personal.kpot ls
-ai/openai
-server/fw0
-```
-
-バックエンド:
-
-| OS | 利用するもの | 必要なもの |
-|---|---|---|
-| macOS | `/usr/bin/security` (Keychain Services) | macOS 同梱、追加インストール不要 |
-| Linux | `secret-tool` (libsecret) | `apt install libsecret-tools` または `dnf install libsecret`、加えて D-Bus session bus が必要 |
-| Windows | `wincred` (Credential Manager) | Windows 同梱 |
-
-**第三者 Go 依存ゼロ** — kpot は zalando/go-keyring 等のライブラリを使わず、各 OS provider の CLI / syscall を直接叩きます。supply chain の trust 範囲が増えません。
-
-設定とフラグ:
-
-| 操作 | 動作 |
-|---|---|
-| `kpot <file>` | キャッシュ済みの鍵があれば即時 unlock。無ければ passphrase prompt + (`auto` モード時) キャッシュ確認 |
-| `kpot <file> --no-cache` | キャッシュ参照と保存をスキップ |
-| `kpot <file> --forget` | 現 vault の cache 削除して exit (subcommand を続けるとそれを no-cache で実行) |
-| `kpot keychain test` | バックエンド診断 (利用可能か、現在のモード) |
-
-`config.toml` の `keychain = "always"` で確認なしキャッシュ、`"never"` で完全無効化。
-
-バージョン跨ぎの整合性:
-- **v1 vault**: passphrase rotate で派生鍵が変わる → cache 自動失効
-- **v2 vault**: passphrase rotate で DEK 不変 → cache はそのまま有効 (これが v0.3 envelope 設計の見返り)
-
-特殊ケース:
-- `KPOT_PASSPHRASE` セット時はキャッシュ参照も書込みもスキップ (CI 汚染防止)
-- リカバリー fallback (`--recover`) はキャッシュに触れない (緊急用なので silent caching を避ける)
-- Linux で D-Bus session 未起動 / `secret-tool` 不在 → silent fallback で passphrase prompt
-- **macOS の既知制約**: `/usr/bin/security add-generic-password -w <hex>` で hex 化した鍵が argv に乗る。Big Sur 以降の `ps` は同 UID 内に制限されるので keychain 参照と同じ脅威境界。気になれば `keychain = "never"`
-
----
-
-## 13. アイドルロック
-
-REPL に入った後、設定された分数の間 1コマンドも入力されないと kpot は自動的に vault を閉じプロセスを終了します。デフォルト 10分、`config.toml` の `idle_lock_minutes` で変更可能。
-
-```
-$ kpot personal.kpot
-Opened personal.kpot (3 notes)
-kpot:personal>
-   ... 10分間アイドル ...
-(idle timeout — vault locked)
-$
-```
-
-仕様:
-- TTY 接続時のみ有効 (heredoc / pipe テストでは無効化)
-- コマンド実行 / Ctrl-C / 空 ENTER でタイマー reset
-- タイマー発火時は `crypto.Zero` で鍵を wipe してから `os.Exit(0)`
-- 単発コマンド (`kpot <file> ls` 等) には影響しない (REPL に入らないため)
-
-無効化は `idle_lock_minutes` を非常に大きい値 (例: `525600` で1年) に設定するか、`KPOT_PASSPHRASE` で REPL 不使用にするしかありません (idle ロックの目的上、完全無効化は意図的にサポートしていません)。
-
----
-
-## 14. 同期について
-
-`kpot` は**同期 transport を持ちません**。これは設計判断であり、欠落ではありません。
-
-`.kpot` は1ファイル完結の暗号化ブロブなので、ユーザーは以下のうち好みの transport を**そのまま**使えます。
-
-| 方法 | 例 |
-|---|---|
-| Git | `git add personal.kpot && git push` |
-| クラウドストレージ | Google Drive / Dropbox / iCloud Drive 上に置く |
-| 同期ツール | Syncthing / rsync / Resilio Sync |
-| 物理メディア | USB / SD カードに `cp` |
-
-### 注意点
-
-- **毎 save で payload 全体が再暗号化される**: 1つの note を変更しただけでも ciphertext は丸ごと差し替わる。これは「変更内容を漏らさない」という設計上の特性であり、副作用として **git diff は意味を持たない**（履歴サイズは膨らむ）
-- **conflict 解決は手動**: 別端末で同じ vault を別々に編集してから sync すると、ciphertext は merge できない。「このマシンが正」運用にする
-- **`.bak` を同期に含めない**: `*.bak` を `.gitignore` / 同期除外に入れる
-- **同時編集対策はまだ無い**: 同一マシンで2つの REPL を同時に開く事故防止 (`<file>.lock`) は v0.5 で追加予定
-
-### v0.5 で追加予定: `kpot merge`
-
-transport は引き続き kpot の責務外。ただし transport-agnostic な vault プリミティブとして以下を v0.5 に予定：
-
-- `kpot merge a.kpot b.kpot -o merged.kpot` — 両 vault を復号 → notes をマージ → 衝突は別キーで残す → 再暗号化
-- `<file>.lock` でローカル並行操作を防止
-- 暗号化 payload に optional な `device_id` / `parent_save_id` を追加し、merge 自動化を補助
-
-これにより、git だろうと Drive だろうと、衝突した2ファイルが手元に揃えば1コマンドで解決できる。
+| `crypto.Zero` | GC による移動後のメモリは保証できない (best-effort) |
+| keychain | ヘッドレス Linux (D-Bus なし) では無効 |
+| リカバリー表示 | TTY 必須 (パイプ・リダイレクト不可) |
+| `KPOT_PASSPHRASE` | セットしたまま使うと passphrase コマンドが同じパスフレーズで上書きされる |
 
 ---
 
 ## 15. 実証ログ
 
-以下は sandbox 環境での実際の動作ログです。
+以下は v0.5.0 をサンドボックス環境で実際に実行した結果です。
 
-### テスト結果
+### テスト環境
 
 ```
-$ go test ./... -count=1
-
-ok  github.com/r2un/kpot/internal/clipboard   (7 tests)
-ok  github.com/r2un/kpot/internal/config      (5 tests)
-ok  github.com/r2un/kpot/internal/crypto      (5 tests)
-ok  github.com/r2un/kpot/internal/editor      (3 tests)
-ok  github.com/r2un/kpot/internal/notefmt     (14 tests)
-ok  github.com/r2un/kpot/internal/repl        (11 completion + 22 repl tests)
-ok  github.com/r2un/kpot/internal/store       (9 tests)
-ok  github.com/r2un/kpot/internal/tty         (2 tests)
-ok  github.com/r2un/kpot/internal/vault       (8 tests)
-
-全 86 テスト PASS ✅
+OS: Linux (ubuntu)
+Go: 1.22.3
+kpot: 0.5.0-dev
 ```
 
-### コマンド実証
+### テスト結果サマリー
+
+| # | テスト内容 | 結果 |
+|---|-----------|------|
+| T01 | 全テストスイート (12パッケージ) | ✅ PASS |
+| T02 | ビルド成功 | ✅ PASS |
+| T03 | ls (one-shot) | ✅ PASS |
+| T04 | read (one-shot) | ✅ PASS |
+| T05 | find (one-shot) | ✅ PASS |
+| T06 | bundle 作成 (.kpb, 0600) | ✅ PASS |
+| T07 | import-bundle (conflict rename) | ✅ PASS |
+| T08 | export to JSON | ✅ PASS |
+| T09 | rm -y (one-shot) | ✅ PASS |
+| T10 | template show | ✅ PASS |
+| T11 | 平文ディスク非漏洩 (vault) | ✅ PASS |
+| T12 | 平文ディスク非漏洩 (bundle) | ✅ PASS |
+| T13 | KDF params 改ざん検出 | ✅ PASS (exit 1) |
+| T14 | nonce 改ざん検出 | ✅ PASS (exit 3) |
+| T15 | payload 改ざん検出 | ✅ PASS (exit 3) |
+| T16 | 誤パスフレーズ拒否 | ✅ PASS (exit 3) |
+| T17 | passphrase rotation | ✅ PASS |
+| T18 | ファイルパーミッション 0600 | ✅ PASS |
+| T19 | recovery-info (v1 vault) | ✅ PASS |
+| T20 | keychain test (unavailable) | ✅ PASS |
+| T21 | export to file + 0600 | ✅ PASS |
+| T22 | import JSON (merge) | ✅ PASS |
+| T23 | version フラグ | ✅ PASS |
+| T24 | 不正ノート名の拒否 | ✅ PASS |
+| T25 | 存在しないファイルのエラー | ✅ PASS |
+
+### 代表的な実行例
+
+#### ls / read / find
 
 ```bash
-# 保管庫の作成
-$ KPOT_PASSPHRASE=demopass kpot init demo.kpot
-Created demo.kpot
--rw------- 507 bytes  ← パーミッション 600
-
-# ノートの作成（3件）
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot note ai/openai
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot note ai/anthropic
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot note server/fw0
-
-# 一覧・読み取り・検索
 $ KPOT_PASSPHRASE=demopass kpot demo.kpot ls
 ai/anthropic
 ai/openai
@@ -787,47 +802,52 @@ server/fw0
 
 $ KPOT_PASSPHRASE=demopass kpot demo.kpot read ai/openai
 OPENAI_API_KEY=sk-demo-1234567890abcdef
-...
 
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot find api
-ai/anthropic  (body)  ANTHROPIC_API_KEY=sk-ant-demo-9876543210
-ai/openai     (body)  OPENAI_API_KEY=sk-demo-1234567890abcdef
+## memo
+OpenAI API key for demo project.
 
-# 平文が vault ファイルに含まれないことを確認
-$ grep "sk-demo" demo.kpot
-(0 件 — 暗号化されている)
+$ KPOT_PASSPHRASE=demopass kpot demo.kpot find ssh
+server/fw0   (body)  Key:  ~/.ssh/id_ed25519_prod
+```
 
-# エクスポート → 削除 → マージインポート
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot export -o /tmp/backup.json
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot rm -y server/fw0
-removed server/fw0
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot import /tmp/backup.json
-merged: +1 new, 2 conflicts renamed (.conflict-YYYYMMDD)
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot ls
-ai/anthropic
-ai/anthropic.conflict-20260425  ← 衝突ノート（安全に保存）
-ai/openai
-ai/openai.conflict-20260425
-server/fw0                      ← 復元成功
+#### bundle / import-bundle
 
-# パスフレーズ変更
-$ KPOT_PASSPHRASE=demopass kpot demo.kpot passphrase
-passphrase changed; previous .bak removed
-$ ls demo.kpot*
-demo.kpot   ← .bak は削除済み（旧パスのバックアップを残さない）
+```bash
+# バンドル作成
+kpot:demo> bundle ai/openai server/fw0 -o transfer.kpb
+Bundle passphrase (recipient will need it):
+wrote 2 notes to transfer.kpb
+note: share the passphrase via a separate channel
 
-# 誤パスフレーズ拒否（exit code 3）
-$ KPOT_PASSPHRASE=wrongpass kpot demo.kpot ls
+# バンドルファイル確認
+$ cat transfer.kpb | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['format'], 'v'+str(d['version']))"
+kpot-bundle v1
+
+# インポート先 vault に取り込み
+kpot:work> import-bundle transfer.kpb
+Source bundle passphrase:
+bundle contains 2 notes:
+  ai/openai   OPENAI_API_KEY=sk-...
+  server/fw0  Host: prod-fw0.example.com
+import 2 notes into this vault? [y/N]: y
+imported: +2 new, 0 conflicts renamed (.conflict-YYYYMMDD)
+```
+
+#### 改ざん検出
+
+```bash
+# KDF memory_kib を改ざん
+$ KPOT_PASSPHRASE=demopass kpot tampered.kpot ls
+argon2id memory too low: 1000 KiB
+# exit code: 1
+
+# payload バイトを反転
+$ KPOT_PASSPHRASE=demopass kpot tampered.kpot ls
 Wrong passphrase, or the file is corrupted
-exit code: 3
-
-# ヘッダー改ざん検出（AAD バインディング）
-$ python3 -c "...iterations を 3→1 に改ざん..."
-$ KPOT_PASSPHRASE=demopass kpot /tmp/tampered.kpot ls
-Wrong passphrase, or the file is corrupted
-exit code: 3   ← 改ざんを検出
+# exit code: 3
 ```
 
 ---
 
-*このマニュアルは kpot v0.2.0-dev に基づいています。*
+*このマニュアルは kpot v0.5.0 に基づいています。*  
+*最新情報は https://github.com/Shin-R2un/kpot を参照してください。*

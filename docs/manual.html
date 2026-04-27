@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>kpot ユーザーマニュアル v0.5.0</title>
+  <style>
+    :root {
+      --bg:#0d1117; --bg2:#161b22; --bg3:#21262d; --border:#30363d;
+      --accent:#58a6ff; --accent2:#3fb950; --warn:#d29922;
+      --text:#e6edf3; --text2:#8b949e; --red:#f85149;
+      --font-mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.7}
+    nav{position:sticky;top:0;z-index:100;background:rgba(13,17,23,.93);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 2rem;height:56px}
+    .nav-brand{font-weight:700;font-size:1.15rem;color:var(--text)}
+    .nav-links a{color:var(--text2);text-decoration:none;font-size:.9rem;margin-left:1.6rem;transition:color .2s}
+    .nav-links a:hover{color:var(--text)}
+    .nav-cta{background:var(--accent);color:#0d1117;padding:.35rem .9rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none;transition:opacity .2s}
+    .nav-cta:hover{opacity:.85}
+    .layout{display:flex;max-width:1200px;margin:0 auto;padding:2rem 1.5rem;gap:2.5rem}
+    aside{width:240px;flex-shrink:0;position:sticky;top:72px;height:fit-content;font-size:.84rem}
+    aside ul{list-style:none;border-left:2px solid var(--border);padding-left:1rem}
+    aside li{margin:.4rem 0}
+    aside a{color:var(--text2);text-decoration:none;transition:color .2s}
+    aside a:hover{color:var(--accent)}
+    article{flex:1;min-width:0}
+    article h1{font-size:2rem;font-weight:800;margin:1.5rem 0 .5rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    article h2{font-size:1.45rem;font-weight:700;margin:2.5rem 0 .8rem;padding-top:.5rem;border-top:1px solid var(--border)}
+    article h3{font-size:1.1rem;font-weight:700;margin:1.8rem 0 .6rem;color:var(--accent)}
+    article h4{font-size:1rem;font-weight:700;margin:1.4rem 0 .5rem}
+    article p{margin:.6rem 0;color:var(--text)}
+    article ul,article ol{margin:.6rem 0 .6rem 1.4rem}
+    article li{margin:.3rem 0}
+    article code{background:var(--bg3);border:1px solid var(--border);padding:.1rem .4rem;border-radius:4px;font-family:var(--font-mono);font-size:.82rem;color:var(--accent2)}
+    article pre{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:1.2rem 1.4rem;overflow-x:auto;margin:1rem 0}
+    article pre code{background:none;border:none;padding:0;font-size:.83rem;color:var(--text);line-height:1.7}
+    article table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.88rem}
+    article th,article td{padding:.6rem .9rem;border:1px solid var(--border);text-align:left}
+    article th{background:var(--bg3);color:var(--text2);font-weight:600}
+    article blockquote{border-left:3px solid var(--warn);background:var(--bg2);padding:.8rem 1.2rem;margin:1rem 0;border-radius:0 8px 8px 0;color:var(--text2)}
+    article hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+    article a{color:var(--accent)}
+    footer{background:var(--bg2);border-top:1px solid var(--border);padding:2rem 1.5rem;text-align:center;color:var(--text2);font-size:.85rem}
+    footer a{color:var(--accent);text-decoration:none}
+    @media(max-width:800px){aside{display:none}.layout{padding:1rem}}
+  </style>
+</head>
+<body>
+<nav>
+  <div class="nav-brand">🔐 kpot マニュアル</div>
+  <div class="nav-links">
+    <a href="index.html">← トップへ</a>
+    <a href="#1-概要">概要</a>
+    <a href="#4-コマンドリファレンス">コマンド</a>
+    <a href="#14-セキュリティ設計">セキュリティ</a>
+  </div>
+  <a class="nav-cta" href="https://github.com/Shin-R2un/kpot" target="_blank">GitHub →</a>
+</nav>
+<div class="layout">
+  <aside>
+    <ul>
+      <li><a href="#1-概要">1. 概要</a></li>
+      <li><a href="#2-インストール">2. インストール</a></li>
+      <li><a href="#3-クイックスタート">3. クイックスタート</a></li>
+      <li><a href="#4-コマンドリファレンス">4. コマンドリファレンス</a>
+        <ul style="margin-left:.8rem;margin-top:.3rem">
+          <li><a href="#41-init">4.1 init</a></li>
+          <li><a href="#42-repl-モード">4.2 REPL モード</a></li>
+          <li><a href="#43-シングルショットモード">4.3 シングルショット</a></li>
+          <li><a href="#44-repl-コマンド詳細">4.4 REPL 詳細</a></li>
+          <li><a href="#45-keychain-サブコマンド">4.5 keychain</a></li>
+        </ul>
+      </li>
+      <li><a href="#5-ノート名のルール">5. ノート名</a></li>
+      <li><a href="#6-テンプレートとプレースホルダー">6. テンプレート</a></li>
+      <li><a href="#7-設定ファイル">7. 設定ファイル</a></li>
+      <li><a href="#8-環境変数">8. 環境変数</a></li>
+      <li><a href="#9-リカバリーキー">9. リカバリーキー</a></li>
+      <li><a href="#10-os-キーチェーン連携">10. OS キーチェーン</a></li>
+      <li><a href="#11-アイドルロック">11. アイドルロック</a></li>
+      <li><a href="#12-バンドル転送-kpb">12. バンドル転送</a></li>
+      <li><a href="#13-ファイルフォーマット">13. ファイルフォーマット</a></li>
+      <li><a href="#14-セキュリティ設計">14. セキュリティ設計</a></li>
+      <li><a href="#15-実証ログ">15. 実証ログ</a></li>
+    </ul>
+  </aside>
+  <article>
+<h1 id="kpot">kpot ユーザーマニュアル</h1>
+<blockquote>
+<p><strong>バージョン</strong>: 0.5.0<br />
+<strong>最終更新</strong>: 2026-04-27<br />
+<strong>リポジトリ</strong>: https://github.com/Shin-R2un/kpot</p>
+</blockquote>
+<hr />
+<h2 id="_1">目次</h2>
+<ol>
+<li><a href="#1-概要">概要</a></li>
+<li><a href="#2-インストール">インストール</a></li>
+<li><a href="#3-クイックスタート">クイックスタート</a></li>
+<li><a href="#4-コマンドリファレンス">コマンドリファレンス</a></li>
+<li><a href="#41-init">init</a></li>
+<li><a href="#42-repl-モード">REPL モード</a></li>
+<li><a href="#43-シングルショットモード">シングルショットモード</a></li>
+<li><a href="#44-repl-コマンド詳細">REPL コマンド詳細</a></li>
+<li><a href="#45-keychain-サブコマンド">keychain サブコマンド</a></li>
+<li><a href="#5-ノート名のルール">ノート名のルール</a></li>
+<li><a href="#6-テンプレートとプレースホルダー">テンプレートとプレースホルダー</a></li>
+<li><a href="#7-設定ファイル">設定ファイル</a></li>
+<li><a href="#8-環境変数">環境変数</a></li>
+<li><a href="#9-リカバリーキー">リカバリーキー</a></li>
+<li><a href="#10-os-キーチェーン連携">OS キーチェーン連携</a></li>
+<li><a href="#11-アイドルロック">アイドルロック</a></li>
+<li><a href="#12-バンドル転送-kpb">バンドル転送 (.kpb)</a></li>
+<li><a href="#13-ファイルフォーマット">ファイルフォーマット</a></li>
+<li><a href="#14-セキュリティ設計">セキュリティ設計</a></li>
+<li><a href="#15-実証ログ">実証ログ</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 概要</h2>
+<p><code>kpot</code>（key pot）は<strong>暗号化された CLI ノート保管庫</strong>です。<br />
+API キー・パスワード・SSH 接続情報・秘密メモなどをひとつの <code>.kpot</code> ファイルに安全に保存します。</p>
+<h3 id="_2">特徴</h3>
+<table>
+<thead>
+<tr>
+<th>機能</th>
+<th>詳細</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>暗号化方式</td>
+<td>Argon2id (64 MiB / 3 / 1) + XChaCha20-Poly1305</td>
+</tr>
+<tr>
+<td>改ざん検出</td>
+<td>ヘッダー全体を AAD として AEAD で保護</td>
+</tr>
+<tr>
+<td>リカバリーキー</td>
+<td>BIP-39 シードフレーズ (12/24語) または Crockford Base32 秘密鍵</td>
+</tr>
+<tr>
+<td>DEK 分離</td>
+<td>v2 vault は DEK をパスフレーズ wrap + recovery wrap で二重保護</td>
+</tr>
+<tr>
+<td>OS キーチェーン</td>
+<td>macOS / Linux (secret-tool) / Windows (Credential Manager) 対応</td>
+</tr>
+<tr>
+<td>原子書き込み</td>
+<td><code>.tmp</code> → <code>.bak</code> → 本体 の 2-phase rename</td>
+</tr>
+<tr>
+<td>アイドルロック</td>
+<td>無操作 N 分でセッション自動ロック (デフォルト 10 分)</td>
+</tr>
+<tr>
+<td>ノート編集</td>
+<td><code>$EDITOR</code> 連携、一時ファイルは <code>/dev/shm</code> に配置</td>
+</tr>
+<tr>
+<td>TAB 補完</td>
+<td>TTY 接続時はコマンド名・ノート名を補完 (liner)</td>
+</tr>
+<tr>
+<td>クリップボード</td>
+<td>コピー後 30 秒で自動消去 (設定変更可)</td>
+</tr>
+<tr>
+<td>バンドル転送</td>
+<td>選択したノートを <code>.kpb</code> ファイルに暗号化して共有</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. インストール</h2>
+<h3 id="linux-macos">ワンライナーインストール (Linux / macOS)</h3>
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.sh | sh
+</code></pre>
+<h3 id="windows-powershell">ワンライナーインストール (Windows PowerShell)</h3>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/Shin-R2un/kpot/main/install.ps1 | iex
+</code></pre>
+<h3 id="go">Go でビルド</h3>
+<pre><code class="language-bash">git clone https://github.com/Shin-R2un/kpot.git
+cd kpot
+make build       # ./kpot を生成
+make test        # 全テスト実行
+make install     # $(go env GOPATH)/bin/kpot にインストール
+</code></pre>
+<h3 id="_3">動作要件</h3>
+<ul>
+<li>Go 1.18 以上 (ビルド時)</li>
+<li>Linux / macOS / Windows</li>
+<li>クリップボード: <code>xclip</code> または <code>wl-clipboard</code> (Linux), <code>pbcopy</code> (macOS), PowerShell (Windows)</li>
+<li>OS キーチェーン (任意): <code>libsecret-tools</code> (Linux), macOS 標準, Windows 標準</li>
+</ul>
+<hr />
+<h2 id="3">3. クイックスタート</h2>
+<pre><code class="language-bash"># 1. 新しい保管庫を作成 (リカバリーシードが表示される)
+kpot init personal.kpot
+
+# 2. 保管庫を開いて REPL に入る
+kpot personal.kpot
+
+# 3. REPL 内で操作
+kpot:personal&gt; note ai/openai      # $EDITOR でノートを作成・編集
+kpot:personal&gt; ls                  # ノート一覧
+kpot:personal&gt; read ai/openai      # ノートを表示
+kpot:personal&gt; copy ai/openai      # クリップボードにコピー (30秒で自動消去)
+kpot:personal&gt; find openai         # 検索
+kpot:personal&gt; rm ai/openai        # 削除 (確認あり)
+kpot:personal&gt; exit
+</code></pre>
+<hr />
+<h2 id="4">4. コマンドリファレンス</h2>
+<h3 id="41-init">4.1 init</h3>
+<pre><code>kpot init &lt;file&gt; [--recovery seed|key] [--recovery-words 12|24]
+</code></pre>
+<p>新しい暗号化保管庫を作成します。<strong>v0.3 以降は常にリカバリーキーが生成されます。</strong></p>
+<table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>説明</th>
+<th>デフォルト</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--recovery seed</code></td>
+<td>BIP-39 ニーモニックシードフレーズを生成</td>
+<td>✓ デフォルト</td>
+</tr>
+<tr>
+<td><code>--recovery key</code></td>
+<td>Crockford Base32 秘密鍵を生成</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--recovery-words 12</code></td>
+<td>12語のシード (128bit エントロピー)</td>
+<td>✓ デフォルト</td>
+</tr>
+<tr>
+<td><code>--recovery-words 24</code></td>
+<td>24語のシード (256bit エントロピー)</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash"># デフォルト (12語シード)
+kpot init personal.kpot
+
+# 24語シード
+kpot init personal.kpot --recovery seed --recovery-words 24
+
+# 秘密鍵形式
+kpot init personal.kpot --recovery key
+</code></pre>
+<blockquote>
+<p>⚠️ <strong>リカバリーキーは init 時に一度だけ表示されます。必ず紙に書き留めてください。</strong><br />
+紛失した場合、パスフレーズを忘れると vault は復元不能になります。</p>
+</blockquote>
+<hr />
+<h3 id="42-repl">4.2 REPL モード</h3>
+<pre><code>kpot &lt;file&gt; [--recover] [--no-cache] [--forget]
+</code></pre>
+<p>インタラクティブなシェルに入ります。</p>
+<table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--recover</code></td>
+<td>リカバリーキーでパスフレーズなしに開く</td>
+</tr>
+<tr>
+<td><code>--no-cache</code></td>
+<td>OS キーチェーンキャッシュを使わない</td>
+</tr>
+<tr>
+<td><code>--forget</code></td>
+<td>キャッシュされたキーを削除してから開く</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash">kpot personal.kpot            # 通常起動
+kpot personal.kpot --recover  # リカバリーキーで起動
+kpot personal.kpot --no-cache # キャッシュ無効
+</code></pre>
+<hr />
+<h3 id="43">4.3 シングルショットモード</h3>
+<pre><code>kpot &lt;file&gt; &lt;command&gt; [args...]
+</code></pre>
+<p>REPL に入らず、コマンドを 1 回だけ実行します。スクリプトや CI 向けです。</p>
+<pre><code class="language-bash">kpot personal.kpot ls
+kpot personal.kpot read ai/openai
+kpot personal.kpot rm -y old/key
+kpot personal.kpot export -o backup.json --force
+</code></pre>
+<hr />
+<h3 id="44-repl">4.4 REPL コマンド詳細</h3>
+<h4 id="ls"><code>ls</code></h4>
+<p>ノート一覧を表示します。</p>
+<pre><code>kpot:personal&gt; ls
+ai/anthropic
+ai/openai
+server/fw0
+</code></pre>
+<hr />
+<h4 id="note-name"><code>note &lt;name&gt;</code></h4>
+<p>ノートを <code>$EDITOR</code> で作成・編集します。<br />
+テンプレートが適用され、フロントマター (作成日・更新日) が自動付与されます。</p>
+<pre><code>kpot:personal&gt; note ai/openai
+</code></pre>
+<hr />
+<h4 id="read-name"><code>read &lt;name&gt;</code></h4>
+<p>ノートの本文を表示します。</p>
+<pre><code>kpot:personal&gt; read ai/openai
+OPENAI_API_KEY=sk-...
+</code></pre>
+<hr />
+<h4 id="copy-name"><code>copy &lt;name&gt;</code></h4>
+<p>ノート本文をクリップボードにコピーします。<br />
+デフォルト 30 秒後に自動消去されます (設定変更可)。</p>
+<pre><code>kpot:personal&gt; copy ai/openai
+copied ai/openai via xclip (auto-clears in 30s)
+</code></pre>
+<hr />
+<h4 id="find-query"><code>find &lt;query&gt;</code></h4>
+<p>ノート名・本文を大文字小文字を区別せずに検索します。</p>
+<pre><code>kpot:personal&gt; find api
+ai/openai   (body)  OPENAI_API_KEY=sk-...
+</code></pre>
+<hr />
+<h4 id="rm-y-name"><code>rm [-y] &lt;name&gt;</code></h4>
+<p>ノートを削除します。<code>-y</code> で確認をスキップします。</p>
+<pre><code>kpot:personal&gt; rm ai/openai
+remove ai/openai? [y/N]: y
+removed ai/openai
+</code></pre>
+<hr />
+<h4 id="passphrase"><code>passphrase</code></h4>
+<p>パスフレーズを変更します。<br />
+v2 vault では DEK は保持され、リカバリーキーは引き続き有効です。</p>
+<pre><code>kpot:personal&gt; passphrase
+New passphrase: 
+Repeat: 
+passphrase changed; previous .bak removed
+</code></pre>
+<hr />
+<h4 id="recovery-info"><code>recovery-info</code></h4>
+<p>リカバリーキーの種別を表示します (シークレットは表示しません)。</p>
+<pre><code>kpot:personal&gt; recovery-info
+Recovery: seed-bip39 (12 words)
+</code></pre>
+<hr />
+<h4 id="template-template-show-template-reset"><code>template</code> / <code>template show</code> / <code>template reset</code></h4>
+<p>新規ノートのテンプレートを管理します。</p>
+<pre><code>kpot:personal&gt; template show      # 現在のテンプレートを表示
+kpot:personal&gt; template           # $EDITOR でテンプレートを編集
+kpot:personal&gt; template reset     # 組み込みデフォルトに戻す
+</code></pre>
+<hr />
+<h4 id="export-o-path-force"><code>export [-o &lt;path&gt;] [--force]</code></h4>
+<p>復号した vault の内容を JSON で出力します。<br />
+デフォルトは stdout。ファイルに書き出す場合は <code>--force</code> が必要です。</p>
+<pre><code>kpot:personal&gt; export
+kpot:personal&gt; export -o backup.json --force
+</code></pre>
+<blockquote>
+<p>⚠️ ファイルに書き出した場合、平文 JSON がディスクに残ります。使用後は削除してください。</p>
+</blockquote>
+<hr />
+<h4 id="import-file-mode-mergereplace-y"><code>import &lt;file&gt; [--mode merge|replace] [-y]</code></h4>
+<p>JSON ファイルからノートをインポートします。</p>
+<table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--mode merge</code></td>
+<td>既存ノートを保持し、新規ノートを追加 (デフォルト)</td>
+</tr>
+<tr>
+<td><code>--mode replace</code></td>
+<td>全ノートを置き換え</td>
+</tr>
+<tr>
+<td><code>-y</code></td>
+<td>確認をスキップ</td>
+</tr>
+</tbody>
+</table>
+<p>衝突したノートは <code>.conflict-YYYYMMDD</code> サフィックスで保存されます。</p>
+<pre><code>kpot:personal&gt; import backup.json --mode merge
+kpot:personal&gt; import backup.json --mode replace -y
+</code></pre>
+<hr />
+<h4 id="bundle-name-o-path-force"><code>bundle &lt;name&gt;... -o &lt;path&gt; [--force]</code></h4>
+<p>選択したノートを暗号化 <code>.kpb</code> ファイルにエクスポートします。<br />
+別パスフレーズで保護するため、受信者は元の vault のパスフレーズを知らなくても構いません。</p>
+<pre><code>kpot:personal&gt; bundle ai/openai server/fw0 -o transfer.kpb
+Bundle passphrase (recipient will need it): 
+wrote 2 notes to transfer.kpb
+note: share the passphrase via a separate channel
+</code></pre>
+<hr />
+<h4 id="import-bundle-path-y"><code>import-bundle &lt;path&gt; [-y]</code></h4>
+<p><code>.kpb</code> ファイルを復号して現在の vault にマージします。</p>
+<pre><code>kpot:personal&gt; import-bundle transfer.kpb
+Source bundle passphrase: 
+bundle contains 2 notes:
+  ai/openai   OPENAI_API_KEY=sk-...
+  server/fw0  Host: example.com
+import 2 notes into this vault? [y/N]: y
+imported: +2 new, 0 conflicts renamed (.conflict-YYYYMMDD)
+</code></pre>
+<hr />
+<h4 id="exit-quit-q"><code>exit</code> / <code>quit</code> / <code>q</code></h4>
+<p>REPL を終了します。</p>
+<hr />
+<h3 id="45-keychain">4.5 keychain サブコマンド</h3>
+<pre><code>kpot keychain test    # バックエンドの診断情報を表示
+kpot keychain forget &lt;file&gt;  # 指定 vault のキャッシュを削除
+</code></pre>
+<pre><code class="language-bash">$ kpot keychain test
+backend: linux-secret-tool
+available: false
+config mode: auto
+hint: install libsecret-tools and ensure DBUS_SESSION_BUS_ADDRESS is set
+</code></pre>
+<hr />
+<h2 id="5">5. ノート名のルール</h2>
+<table>
+<thead>
+<tr>
+<th>ルール</th>
+<th>詳細</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>使用可能文字</td>
+<td><code>a-z 0-9 . - _ /</code> (ASCII のみ)</td>
+</tr>
+<tr>
+<td>大文字</td>
+<td>自動的に小文字に変換</td>
+</tr>
+<tr>
+<td>長さ</td>
+<td>1〜128 文字</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>ディレクトリ区切りとして使用可能</td>
+</tr>
+<tr>
+<td>先頭・末尾の <code>/</code></td>
+<td>不可</td>
+</tr>
+<tr>
+<td>連続した <code>//</code></td>
+<td>不可</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash"># 有効な名前
+ai/openai
+server/prod/db
+my-secret_key.v2
+
+# 無効な名前 (エラーになる)
+/leading-slash
+trailing/slash/
+double//slash
+UPPERCASE         # → uppercase に自動変換
+</code></pre>
+<hr />
+<h2 id="6">6. テンプレートとプレースホルダー</h2>
+<p>新規ノート作成時に適用されるテンプレートをカスタマイズできます。</p>
+<h3 id="_4">組み込みデフォルトテンプレート</h3>
+<pre><code class="language-markdown"># {{name}}
+
+- id:
+- url:
+- password:
+- api_key:
+
+## memo
+
+</code></pre>
+<h3 id="_5">サポートされるプレースホルダー</h3>
+<table>
+<thead>
+<tr>
+<th>プレースホルダー</th>
+<th>展開内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{{name}}</code></td>
+<td>ノートのフルパス名 (例: <code>ai/openai</code>)</td>
+</tr>
+<tr>
+<td><code>{{basename}}</code></td>
+<td>最終セグメント (例: <code>openai</code>)</td>
+</tr>
+<tr>
+<td><code>{{date}}</code></td>
+<td>今日の日付 (例: <code>2026-04-27</code>)</td>
+</tr>
+<tr>
+<td><code>{{time}}</code></td>
+<td>現在時刻 (例: <code>14:30:00</code>)</td>
+</tr>
+<tr>
+<td><code>{{datetime}}</code></td>
+<td>日時 (例: <code>2026-04-27 14:30:00</code>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_6">テンプレートのカスタマイズ</h3>
+<pre><code>kpot:personal&gt; template
+</code></pre>
+<p><code>$EDITOR</code> が開き、テンプレートを編集できます。保存すると vault に保存されます。</p>
+<hr />
+<h2 id="7">7. 設定ファイル</h2>
+<p><code>~/.config/kpot/config.toml</code> に設定を記述できます。</p>
+<pre><code class="language-toml"># 使用するエディタ ($EDITOR より優先される)
+editor = &quot;vim&quot;
+
+# クリップボード自動消去までの秒数 (デフォルト: 30)
+clipboard_clear_seconds = 60
+
+# OS キーチェーン動作 (&quot;auto&quot; | &quot;always&quot; | &quot;never&quot;, デフォルト: &quot;auto&quot;)
+keychain = &quot;auto&quot;
+
+# アイドルロックまでの分数 (デフォルト: 10)
+idle_lock_minutes = 15
+</code></pre>
+<hr />
+<h2 id="8">8. 環境変数</h2>
+<table>
+<thead>
+<tr>
+<th>変数名</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KPOT_PASSPHRASE</code></td>
+<td>パスフレーズを直接指定 (非推奨・CI 用途のみ)</td>
+</tr>
+<tr>
+<td><code>KPOT_BUNDLE_PASSPHRASE</code></td>
+<td>bundle/import-bundle のパスフレーズを指定</td>
+</tr>
+<tr>
+<td><code>EDITOR</code></td>
+<td>ノート編集に使用するエディタ</td>
+</tr>
+<tr>
+<td><code>VISUAL</code></td>
+<td><code>EDITOR</code> のフォールバック</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <code>KPOT_PASSPHRASE</code> と <code>KPOT_BUNDLE_PASSPHRASE</code> は<strong>意図的に分離</strong>されています。<br />
+vault 開錠用のパスフレーズがバンドルパスフレーズに混入するのを防ぐためです。</p>
+</blockquote>
+<hr />
+<h2 id="9">9. リカバリーキー</h2>
+<p>v0.3 以降の vault はすべてリカバリーキーを持ちます。<br />
+パスフレーズを忘れた場合でも、リカバリーキーがあれば vault を開けます。</p>
+<h3 id="_7">種類</h3>
+<h4 id="bip-39">BIP-39 シードフレーズ (デフォルト)</h4>
+<pre><code> 1. abandon      2. ability      3. able         4. about
+ 5. above        6. absent       7. absorb        8. abstract
+ 9. absurd      10. abuse       11. access       12. accident
+</code></pre>
+<ul>
+<li>12語 (128bit) または 24語 (256bit) のニーモニック</li>
+<li>業界標準の BIP-39 形式</li>
+<li>オフラインで保管 (金庫・紙など)</li>
+</ul>
+<h4 id="crockford-base32">Crockford Base32 秘密鍵</h4>
+<pre><code>AAAAAAAA-BBBBBBBB-CCCCCCCC-DDDDDDDD-EEEEEEEE-FFFFFFF0-GGGGGGGG
+</code></pre>
+<ul>
+<li>32バイト (256bit) のランダムシークレット</li>
+<li>O→0, I→1, L→1 の誤字自動修正 (Crockford 仕様)</li>
+<li>8文字区切りで読み上げ・手書きしやすい</li>
+</ul>
+<h3 id="vault">リカバリーキーで vault を開く</h3>
+<pre><code class="language-bash">kpot personal.kpot --recover
+Enter recovery seed (or secret key): abandon ability able ...
+</code></pre>
+<h3 id="_8">セキュリティ特性</h3>
+<ul>
+<li>リカバリーキーは <strong>init 時に一度だけ <code>/dev/tty</code> に表示</strong>され、ログに残りません</li>
+<li>パスフレーズを変更 (<code>passphrase</code>) してもリカバリーキーは<strong>引き続き有効</strong>です</li>
+<li>DEK (Data Encryption Key) が分離されているため、パスフレーズ変更時に DEK は変わりません</li>
+</ul>
+<hr />
+<h2 id="10-os">10. OS キーチェーン連携</h2>
+<p>一度パスフレーズを入力すると、OS のネイティブシークレットストアに vault の開錠キーをキャッシュします。<br />
+次回以降はパスフレーズ入力・Argon2id 計算をスキップして高速に開けます。</p>
+<h3 id="_9">対応バックエンド</h3>
+<table>
+<thead>
+<tr>
+<th>OS</th>
+<th>バックエンド</th>
+<th>必要条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>Apple Security Services</td>
+<td>標準搭載</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td>GNOME Secret Service (secret-tool)</td>
+<td><code>libsecret-tools</code> + D-Bus セッション</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>Windows Credential Manager</td>
+<td>標準搭載</td>
+</tr>
+</tbody>
+</table>
+<h3 id="linux">Linux でのセットアップ</h3>
+<pre><code class="language-bash"># Ubuntu / Debian
+sudo apt install libsecret-tools
+
+# Fedora / RHEL
+sudo dnf install libsecret
+
+# Arch
+sudo pacman -S libsecret
+</code></pre>
+<h3 id="_10">キャッシュ管理</h3>
+<pre><code class="language-bash">kpot keychain test                    # 動作確認
+kpot personal.kpot --forget           # キャッシュ削除
+kpot personal.kpot --no-cache         # キャッシュを使わずに開く
+</code></pre>
+<h3 id="_11">設定</h3>
+<pre><code class="language-toml"># config.toml
+keychain = &quot;auto&quot;    # 初回だけ確認 (デフォルト)
+keychain = &quot;always&quot;  # 常にキャッシュ
+keychain = &quot;never&quot;   # キャッシュしない
+</code></pre>
+<hr />
+<h2 id="11">11. アイドルロック</h2>
+<p>REPL セッションで一定時間操作がないと自動的にセッションを終了します。</p>
+<ul>
+<li><strong>デフォルト</strong>: 10 分</li>
+<li>タイムアウト時にキーマテリアルを消去して終了します</li>
+<li>コマンドを実行するたびにタイマーがリセットされます</li>
+<li>非 TTY 環境 (パイプ等) では発動しません</li>
+</ul>
+<h3 id="_12">設定</h3>
+<pre><code class="language-toml"># config.toml
+idle_lock_minutes = 5   # 5分でロック
+idle_lock_minutes = 0   # デフォルト (10分)
+</code></pre>
+<hr />
+<h2 id="12-kpb">12. バンドル転送 (.kpb)</h2>
+<p>選択したノートだけを暗号化した <code>.kpb</code> (kpot bundle) ファイルに書き出し、別の vault へ安全に転送できます。</p>
+<h3 id="_13">用途</h3>
+<ul>
+<li>チームメンバーへの認証情報共有</li>
+<li>別の vault への選択的なコピー</li>
+<li>バックアップの一部を切り出して共有</li>
+</ul>
+<h3 id="_14">仕組み</h3>
+<pre><code>bundle passphrase
+    ↓ Argon2id
+    KEK (Key Encryption Key)
+    ↓ XChaCha20-Poly1305
+    BEK (Bundle Encryption Key)  ← wrapped_bek フィールドに格納
+    ↓ XChaCha20-Poly1305
+    Payload (notes JSON)
+</code></pre>
+<h3 id="_15">バンドル作成</h3>
+<pre><code class="language-bash"># REPL から
+kpot:personal&gt; bundle ai/openai server/fw0 -o transfer.kpb
+
+# シングルショット
+kpot personal.kpot bundle ai/openai server/fw0 -o transfer.kpb
+</code></pre>
+<h3 id="_16">バンドルのインポート</h3>
+<pre><code class="language-bash"># REPL から
+kpot:work&gt; import-bundle transfer.kpb
+
+# シングルショット
+kpot work.kpot import-bundle transfer.kpb -y
+</code></pre>
+<h3 id="_17">注意</h3>
+<ul>
+<li>バンドルパスフレーズは受信者に別チャネルで伝えてください</li>
+<li><code>KPOT_BUNDLE_PASSPHRASE</code> 環境変数でバイパス可能 (CI 用途)</li>
+<li>同名ノートは <code>.conflict-YYYYMMDD</code> にリネームされ、<strong>上書きされません</strong></li>
+</ul>
+<hr />
+<h2 id="13">13. ファイルフォーマット</h2>
+<h3 id="vault-kpot">vault ファイル (.kpot)</h3>
+<pre><code class="language-json">{
+  &quot;format&quot;: &quot;kpot&quot;,
+  &quot;version&quot;: 2,
+  &quot;passphrase_wrap&quot;: {
+    &quot;kind&quot;: &quot;passphrase&quot;,
+    &quot;kdf&quot;: {
+      &quot;name&quot;: &quot;argon2id&quot;,
+      &quot;salt&quot;: &quot;&lt;base64&gt;&quot;,
+      &quot;params&quot;: { &quot;memory_kib&quot;: 65536, &quot;iterations&quot;: 3, &quot;parallelism&quot;: 1 }
+    },
+    &quot;nonce&quot;: &quot;&lt;base64 24B&gt;&quot;,
+    &quot;wrapped_dek&quot;: &quot;&lt;base64&gt;&quot;
+  },
+  &quot;recovery_wrap&quot;: {
+    &quot;kind&quot;: &quot;seed-bip39&quot;,
+    &quot;kdf&quot;: { &quot;name&quot;: &quot;pbkdf2-sha512&quot;, &quot;iterations&quot;: 2048 },
+    &quot;nonce&quot;: &quot;&lt;base64 24B&gt;&quot;,
+    &quot;wrapped_dek&quot;: &quot;&lt;base64&gt;&quot;
+  },
+  &quot;cipher&quot;: {
+    &quot;name&quot;: &quot;xchacha20-poly1305&quot;,
+    &quot;nonce&quot;: &quot;&lt;base64 24B&gt;&quot;
+  },
+  &quot;payload&quot;: &quot;&lt;base64 ciphertext + 16B Poly1305 tag&gt;&quot;
+}
+</code></pre>
+<h3 id="v1-vault">v1 vault (旧形式・後方互換)</h3>
+<p>v0.1/v0.2 で作成した vault はそのまま使えます。<br />
+DEK は KDF 鍵と同一です (リカバリーキーなし)。</p>
+<h3 id="_18">プレーンテキスト (復号後)</h3>
+<pre><code class="language-json">{
+  &quot;version&quot;: 1,
+  &quot;created_at&quot;: &quot;2026-04-27T00:00:00Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-04-27T12:00:00Z&quot;,
+  &quot;template&quot;: &quot;&quot;,
+  &quot;notes&quot;: {
+    &quot;ai/openai&quot;: {
+      &quot;body&quot;: &quot;OPENAI_API_KEY=sk-...&quot;,
+      &quot;created_at&quot;: &quot;2026-04-27T00:00:00Z&quot;,
+      &quot;updated_at&quot;: &quot;2026-04-27T12:00:00Z&quot;
+    }
+  }
+}
+</code></pre>
+<h3 id="kpb">バンドルファイル (.kpb)</h3>
+<pre><code class="language-json">{
+  &quot;format&quot;: &quot;kpot-bundle&quot;,
+  &quot;version&quot;: 1,
+  &quot;kdf&quot;: { &quot;name&quot;: &quot;argon2id&quot;, &quot;salt&quot;: &quot;&lt;base64&gt;&quot;, &quot;params&quot;: { ... } },
+  &quot;wrap_nonce&quot;: &quot;&lt;base64&gt;&quot;,
+  &quot;wrapped_bek&quot;: &quot;&lt;base64&gt;&quot;,
+  &quot;cipher&quot;: { &quot;name&quot;: &quot;xchacha20-poly1305&quot; },
+  &quot;nonce&quot;: &quot;&lt;base64&gt;&quot;,
+  &quot;payload&quot;: &quot;&lt;base64&gt;&quot;
+}
+</code></pre>
+<hr />
+<h2 id="14">14. セキュリティ設計</h2>
+<h3 id="_19">暗号プリミティブ</h3>
+<table>
+<thead>
+<tr>
+<th>用途</th>
+<th>アルゴリズム</th>
+<th>パラメータ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>パスフレーズ → KEK</td>
+<td>Argon2id</td>
+<td>m=64MiB, t=3, p=1</td>
+</tr>
+<tr>
+<td>シードフレーズ → KEK</td>
+<td>PBKDF2-HMAC-SHA512</td>
+<td>2048回</td>
+</tr>
+<tr>
+<td>秘密鍵 → KEK</td>
+<td>HKDF-SHA256</td>
+<td>—</td>
+</tr>
+<tr>
+<td>DEK 暗号化 (wrap)</td>
+<td>XChaCha20-Poly1305</td>
+<td>24B nonce</td>
+</tr>
+<tr>
+<td>ペイロード暗号化</td>
+<td>XChaCha20-Poly1305</td>
+<td>24B nonce</td>
+</tr>
+<tr>
+<td>ナンス生成</td>
+<td>crypto/rand</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="aad">AAD (追加認証データ)</h3>
+<p>ヘッダー全体 (KDF パラメータ・ nonce を含む) が AAD として使われます。<br />
+KDF パラメータのダウングレード・ヘッダーの差し替えは AEAD の認証タグ検証で検出されます。</p>
+<h3 id="_20">キーマテリアルの保護</h3>
+<ul>
+<li>一時ファイルは <code>/dev/shm</code> (Linux) または OS 標準テンポラリに配置</li>
+<li>セッション終了時に <code>crypto.Zero()</code> でメモリを上書き</li>
+<li>パスフレーズ入力時は <code>term.ReadPassword</code> でエコーを抑制</li>
+<li>リカバリーキー表示は <code>/dev/tty</code> (Unix) / <code>os.Stdout</code> (Windows) に直接書き込み</li>
+</ul>
+<h3 id="_21">耐改ざん性</h3>
+<pre><code>改ざん箇所      → 検出方法
+----------------------------------------------------
+KDF params      → Validate() 最小値チェック + AAD 不一致
+payload         → Poly1305 タグ検証失敗 (ErrAuthFailed)
+nonce           → AAD 不一致 → Poly1305 タグ検証失敗
+wrapped_dek     → AEAD 認証失敗 (ErrAuthFailed)
+recovery_wrap   → WrapAAD 不一致 → AEAD 認証失敗
+</code></pre>
+<h3 id="_22">原子書き込み</h3>
+<pre><code>1. &lt;file&gt;.tmp に書き込み + fsync
+2. &lt;file&gt; → &lt;file&gt;.bak にリネーム
+3. &lt;file&gt;.tmp → &lt;file&gt; にリネーム
+4. ディレクトリを fsync
+</code></pre>
+<p>クラッシュ後も <code>&lt;file&gt;</code> または <code>&lt;file&gt;.bak</code> のどちらかは必ず残り、復元できます。</p>
+<h3 id="_23">既知の制限</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>詳細</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>crypto.Zero</code></td>
+<td>GC による移動後のメモリは保証できない (best-effort)</td>
+</tr>
+<tr>
+<td>keychain</td>
+<td>ヘッドレス Linux (D-Bus なし) では無効</td>
+</tr>
+<tr>
+<td>リカバリー表示</td>
+<td>TTY 必須 (パイプ・リダイレクト不可)</td>
+</tr>
+<tr>
+<td><code>KPOT_PASSPHRASE</code></td>
+<td>セットしたまま使うと passphrase コマンドが同じパスフレーズで上書きされる</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="15">15. 実証ログ</h2>
+<p>以下は v0.5.0 をサンドボックス環境で実際に実行した結果です。</p>
+<h3 id="_24">テスト環境</h3>
+<pre><code>OS: Linux (ubuntu)
+Go: 1.22.3
+kpot: 0.5.0-dev
+</code></pre>
+<h3 id="_25">テスト結果サマリー</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>テスト内容</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T01</td>
+<td>全テストスイート (12パッケージ)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T02</td>
+<td>ビルド成功</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T03</td>
+<td>ls (one-shot)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T04</td>
+<td>read (one-shot)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T05</td>
+<td>find (one-shot)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T06</td>
+<td>bundle 作成 (.kpb, 0600)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T07</td>
+<td>import-bundle (conflict rename)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T08</td>
+<td>export to JSON</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T09</td>
+<td>rm -y (one-shot)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T10</td>
+<td>template show</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T11</td>
+<td>平文ディスク非漏洩 (vault)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T12</td>
+<td>平文ディスク非漏洩 (bundle)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T13</td>
+<td>KDF params 改ざん検出</td>
+<td>✅ PASS (exit 1)</td>
+</tr>
+<tr>
+<td>T14</td>
+<td>nonce 改ざん検出</td>
+<td>✅ PASS (exit 3)</td>
+</tr>
+<tr>
+<td>T15</td>
+<td>payload 改ざん検出</td>
+<td>✅ PASS (exit 3)</td>
+</tr>
+<tr>
+<td>T16</td>
+<td>誤パスフレーズ拒否</td>
+<td>✅ PASS (exit 3)</td>
+</tr>
+<tr>
+<td>T17</td>
+<td>passphrase rotation</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T18</td>
+<td>ファイルパーミッション 0600</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T19</td>
+<td>recovery-info (v1 vault)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T20</td>
+<td>keychain test (unavailable)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T21</td>
+<td>export to file + 0600</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T22</td>
+<td>import JSON (merge)</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T23</td>
+<td>version フラグ</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T24</td>
+<td>不正ノート名の拒否</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>T25</td>
+<td>存在しないファイルのエラー</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_26">代表的な実行例</h3>
+<h4 id="ls-read-find">ls / read / find</h4>
+<pre><code class="language-bash">$ KPOT_PASSPHRASE=demopass kpot demo.kpot ls
+ai/anthropic
+ai/openai
+server/fw0
+
+$ KPOT_PASSPHRASE=demopass kpot demo.kpot read ai/openai
+OPENAI_API_KEY=sk-demo-1234567890abcdef
+
+## memo
+OpenAI API key for demo project.
+
+$ KPOT_PASSPHRASE=demopass kpot demo.kpot find ssh
+server/fw0   (body)  Key:  ~/.ssh/id_ed25519_prod
+</code></pre>
+<h4 id="bundle-import-bundle">bundle / import-bundle</h4>
+<pre><code class="language-bash"># バンドル作成
+kpot:demo&gt; bundle ai/openai server/fw0 -o transfer.kpb
+Bundle passphrase (recipient will need it):
+wrote 2 notes to transfer.kpb
+note: share the passphrase via a separate channel
+
+# バンドルファイル確認
+$ cat transfer.kpb | python3 -c &quot;import sys,json; d=json.load(sys.stdin); print(d['format'], 'v'+str(d['version']))&quot;
+kpot-bundle v1
+
+# インポート先 vault に取り込み
+kpot:work&gt; import-bundle transfer.kpb
+Source bundle passphrase:
+bundle contains 2 notes:
+  ai/openai   OPENAI_API_KEY=sk-...
+  server/fw0  Host: prod-fw0.example.com
+import 2 notes into this vault? [y/N]: y
+imported: +2 new, 0 conflicts renamed (.conflict-YYYYMMDD)
+</code></pre>
+<h4 id="_27">改ざん検出</h4>
+<pre><code class="language-bash"># KDF memory_kib を改ざん
+$ KPOT_PASSPHRASE=demopass kpot tampered.kpot ls
+argon2id memory too low: 1000 KiB
+# exit code: 1
+
+# payload バイトを反転
+$ KPOT_PASSPHRASE=demopass kpot tampered.kpot ls
+Wrong passphrase, or the file is corrupted
+# exit code: 3
+</code></pre>
+<hr />
+<p><em>このマニュアルは kpot v0.5.0 に基づいています。</em><br />
+<em>最新情報は https://github.com/Shin-R2un/kpot を参照してください。</em></p>
+  </article>
+</div>
+<footer>
+  <p>kpot v0.5.0 · MIT License · <a href="https://github.com/Shin-R2un/kpot" target="_blank">github.com/Shin-R2un/kpot</a></p>
+</footer>
+</body>
+</html>
