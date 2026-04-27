@@ -35,6 +35,8 @@ archives:
         formats: [zip]
     files:
       - README.md
+      - LICENSE
+      - SECURITY.md
       - docs/*
 
 checksum:

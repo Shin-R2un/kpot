@@ -435,6 +435,23 @@ and are unaffected. Adjust the period via `idle_lock_minutes` in
 - v0.7: TUI mode (bubbletea)
 - v0.8: MCP / agent integration
 
+## Security
+
+kpot stores secrets, so security posture matters:
+
+- **Threat model**: see [`docs/security.md`](docs/security.md) for what
+  kpot defends against (lost laptop, cloud sync, casual snooping)
+  and what it explicitly does not (compromised host, memory dumps,
+  side channels).
+- **Vulnerability reports**: see [`SECURITY.md`](SECURITY.md). Use
+  GitHub Security Advisories first; backup contact is shin@r2un.com.
+  Acknowledgement within 7 days, coordinated disclosure on a 60–90
+  day timeline.
+
+## License
+
+[MIT](LICENSE) © 2026 Shin-R2un
+
 ## File layout
 
 ```
