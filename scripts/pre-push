@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# kpot pre-push hook — runs `make check` before allowing the push.
+#
+# Installed by `make install-hooks`. Uninstall with `make uninstall-hooks`.
+#
+# To bypass in an emergency:  git push --no-verify
+
+set -e
+
+# Read every "<local_ref> <local_sha> <remote_ref> <remote_sha>" line
+# git feeds us on stdin. If we're only deleting refs (all-zero local
+# sha) there's nothing to test — let the push through.
+zero='0000000000000000000000000000000000000000'
+all_deletes=1
+while IFS=' ' read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ -n "$local_sha" ] && [ "$local_sha" != "$zero" ]; then
+    all_deletes=0
+  fi
+done
+
+if [ "$all_deletes" -eq 1 ]; then
+  exit 0
+fi
+
+# Run from the repo root so `make` resolves the right Makefile.
+cd "$(git rev-parse --show-toplevel)"
+
+if ! make --no-print-directory check; then
+  echo "" >&2
+  echo "kpot pre-push: 'make check' failed; aborting push." >&2
+  echo "  Fix the issues above, or skip this check with: git push --no-verify" >&2
+  exit 1
+fi
