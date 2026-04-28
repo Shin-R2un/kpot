@@ -448,6 +448,31 @@ and are unaffected. Adjust the period via `idle_lock_minutes` in
 - v0.7: TUI mode (bubbletea)
 - v0.8: MCP / agent integration
 
+## Development
+
+Dev tooling is under `make help`. The most-used targets:
+
+```bash
+make build              # → ./kpot
+make check              # vet + gofmt-check + test (mirrors CI exactly)
+make fmt                # gofmt -w .
+
+make release-patch      # v0.6.0 → v0.6.1 (auto: bump + tag-message + push)
+make release-minor      # v0.6.0 → v0.7.0
+make release-major      # v0.6.0 → v1.0.0
+
+make install-hooks      # adds .git/hooks/pre-push that runs 'make check'
+                        # before every push (skip with --no-verify)
+make uninstall-hooks
+```
+
+The `release-*` targets run `make check` first, refuse on a dirty
+tree or out-of-sync `main`, generate a tag message from `git log`,
+ask for confirmation, then `git push origin v0.X.Y` — which triggers
+the GitHub Actions release workflow (binaries + scoop manifest auto-
+update). Append `YES=1` (e.g. `make release-patch YES=1`) to skip
+the prompt.
+
 ## Security
 
 kpot stores secrets, so security posture matters:
