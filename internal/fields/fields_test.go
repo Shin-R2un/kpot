@@ -147,6 +147,32 @@ func TestSetPreservesKeyCase(t *testing.T) {
 	}
 }
 
+// TestSetPreservesSpacing locks in formatLine's behavior across
+// non-canonical spacings so future refactors don't silently
+// "normalize" a user's preferred style.
+func TestSetPreservesSpacing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"single-space", "# n\n\nurl: old\n", "url: NEW"},
+		{"double-space", "# n\n\nurl:  old\n", "url:  NEW"},
+		{"no-space", "# n\n\nurl:old\n", "url: NEW"},             // → normalize to one space
+		{"space-before-colon", "# n\n\nURL :old\n", "URL : NEW"}, // → key case preserved, space-after normalized
+		{"empty-value", "# n\n\nurl:\n", "url: NEW"},             // → normalize to one space
+		{"tab-after-colon", "# n\n\nurl:\told\n", "url:\tNEW"},   // → tab preserved
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := Set(c.body, "url", "NEW")
+			if !strings.Contains(out, c.want) {
+				t.Errorf("Set on %q: result %q does not contain %q", c.body, out, c.want)
+			}
+		})
+	}
+}
+
 func TestUnsetRemovesLine(t *testing.T) {
 	out := Unset(sample, "apikey")
 	if _, ok := Get(out, "apikey"); ok {
@@ -183,9 +209,13 @@ func TestNamesOrder(t *testing.T) {
 
 func TestIsSecretField(t *testing.T) {
 	cases := map[string]bool{
-		"pass":          true,
-		"PASSWORD":      true,
-		"pwd":           true,
+		// passphrase family
+		"pass":     true,
+		"PASSWORD": true,
+		"pwd":      true,
+		"pin":      true,
+
+		// API tokens
 		"apikey":        true,
 		"api_key":       true,
 		"api-key":       true,
@@ -194,10 +224,25 @@ func TestIsSecretField(t *testing.T) {
 		"secret":        true,
 		"client_secret": true,
 		"client-secret": true,
-		"url":           false,
-		"id":            false,
-		"email":         false,
-		"":              false,
+
+		// 2FA
+		"otp":      true,
+		"totp":     true,
+		"otp_seed": true,
+		"otp-seed": true,
+
+		// private keys
+		"private_key": true,
+		"private-key": true,
+		"ssh_key":     true,
+		"ssh-key":     true,
+
+		// non-secret
+		"url":      false,
+		"id":       false,
+		"email":    false,
+		"username": false,
+		"":         false,
 	}
 	for k, want := range cases {
 		if got := IsSecretField(k); got != want {

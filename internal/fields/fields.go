@@ -49,9 +49,13 @@ type Field struct {
 // the canonical key — the variants below cover the common spellings
 // people actually use.
 var secretFieldNames = map[string]struct{}{
-	"pass":          {},
-	"password":      {},
-	"pwd":           {},
+	// passphrase / login secrets
+	"pass":     {},
+	"password": {},
+	"pwd":      {},
+	"pin":      {},
+
+	// API / service tokens
 	"apikey":        {},
 	"api_key":       {},
 	"api-key":       {},
@@ -60,6 +64,20 @@ var secretFieldNames = map[string]struct{}{
 	"secret":        {},
 	"client_secret": {},
 	"client-secret": {},
+
+	// 2FA / one-time codes — TOTP seeds in particular are
+	// unrecoverable if leaked.
+	"otp":      {},
+	"totp":     {},
+	"otp_seed": {},
+	"otp-seed": {},
+
+	// Asymmetric private keys — arguably the highest-stakes single
+	// field a kpot user would store.
+	"private_key": {},
+	"private-key": {},
+	"ssh_key":     {},
+	"ssh-key":     {},
 }
 
 // IsSecretField reports whether key is one of the well-known secret
@@ -194,11 +212,20 @@ func Unset(body, key string) string {
 }
 
 // formatLine rebuilds an updated `key: value` line, preserving the
-// exact spacing/colon style the user originally used (e.g.
-// "url:  https://…" vs. "url:https://…"). We extract the prefix up
-// to and including the first colon from original, then add the new
-// value with one space after the colon as a sane default if the
-// original had no value at all.
+// exact spacing the user originally used both BEFORE and AFTER the
+// colon. Examples (→ shows the rewrite for newValue="X"):
+//
+//	"url: old"     → "url: X"
+//	"url:  old"    → "url:  X"      (two spaces after colon kept)
+//	"url:old"      → "url: X"       (no space → normalize to one)
+//	"URL :old"     → "URL : X"      (space before colon preserved,
+//	                                 no space after → normalize)
+//	"key:"         → "key: X"       (empty value → normalize spacing)
+//
+// Rule: keep the prefix up to and including the colon verbatim
+// (preserves before-colon whitespace and key case). For the
+// after-colon side, copy the original whitespace run if there was
+// one, otherwise insert a single space as a sane default.
 func formatLine(originalKey, newValue, original string) string {
 	colon := strings.Index(original, ":")
 	if colon < 0 {
@@ -207,12 +234,18 @@ func formatLine(originalKey, newValue, original string) string {
 		return originalKey + ": " + newValue
 	}
 	prefix := original[:colon+1]
-	// If the prefix didn't already end with whitespace, add a single
-	// space so the result reads naturally.
-	if !strings.HasSuffix(prefix, " ") {
-		prefix += " "
+	postColon := original[colon+1:]
+	// Capture the leading whitespace run after the colon (if any)
+	// so we can emit the same number of spaces/tabs.
+	wsEnd := 0
+	for wsEnd < len(postColon) && (postColon[wsEnd] == ' ' || postColon[wsEnd] == '\t') {
+		wsEnd++
 	}
-	return prefix + newValue
+	ws := postColon[:wsEnd]
+	if ws == "" {
+		ws = " "
+	}
+	return prefix + ws + newValue
 }
 
 // insertionPoint chooses the line index at which a brand-new field

@@ -814,6 +814,15 @@ func (s *Session) set(args []string) error {
 	} else {
 		v, err := s.promptForFieldValue(field)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// User Ctrl-D'd at the secret prompt or stdin
+				// closed mid-script. Treat as a clean cancel
+				// rather than surfacing "error: EOF" to the
+				// session loop — the field is unchanged and
+				// the REPL stays usable.
+				fmt.Fprintln(s.out, "(cancelled)")
+				return nil
+			}
 			return err
 		}
 		value = v

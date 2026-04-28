@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sampleNote is the canonical body used by most context tests. It
@@ -431,6 +432,77 @@ func TestUnsetMissingFieldErrors(t *testing.T) {
 	_, err := s.dispatch("unset", []string{"nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected not-found error, got %v", err)
+	}
+}
+
+// --- vault state coherence ---
+
+// TestSetPreservesCreatedAt locks in store.Put's invariant that
+// updating an existing note's body via `set` does not bump its
+// CreatedAt timestamp. If store.Put's behavior ever changes,
+// silent CreatedAt drift would be a real footgun for users
+// relying on `created:` for record-keeping.
+func TestSetPreservesCreatedAt(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+	seedContextVault(t, s)
+
+	original, _ := s.Vault.Get("ai/openai")
+	createdBefore := original.CreatedAt
+	updatedBefore := original.UpdatedAt
+
+	// Sleep enough for UpdatedAt to differ measurably even on
+	// systems with coarse clock resolution.
+	time.Sleep(2 * time.Millisecond)
+
+	s.dispatch("cd", []string{"ai/openai"})
+	if _, err := s.dispatch("set", []string{"url", "https://api.openai.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	after, _ := s.Vault.Get("ai/openai")
+	if !after.CreatedAt.Equal(createdBefore) {
+		t.Errorf("CreatedAt drifted: before=%v after=%v", createdBefore, after.CreatedAt)
+	}
+	if !after.UpdatedAt.After(updatedBefore) {
+		t.Errorf("UpdatedAt did not advance: before=%v after=%v", updatedBefore, after.UpdatedAt)
+	}
+}
+
+// TestShowAfterNoteVanishedClearsContext exercises the "note
+// disappeared between cd and the next command" branch in show.
+// The same branch exists in cp/set/unset/fields — covering one
+// is enough to prove the pattern works; if it ever breaks the
+// in-memory test would catch it.
+func TestShowAfterNoteVanishedClearsContext(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+	seedContextVault(t, s)
+
+	s.dispatch("cd", []string{"ai/openai"})
+	if s.currentNote != "ai/openai" {
+		t.Fatalf("setup: cd did not set context")
+	}
+
+	// Simulate an external (or concurrent) deletion: bypass the
+	// REPL command and remove the note directly. This is what
+	// would happen in a future split-vault world or via another
+	// process modifying the file underneath us.
+	if err := s.Vault.Delete("ai/openai"); err != nil {
+		t.Fatalf("setup: Delete returned error: %v", err)
+	}
+
+	_, err := s.dispatch("show", nil)
+	if err == nil {
+		t.Fatal("expected error from show after note vanished, got nil")
+	}
+	if !strings.Contains(err.Error(), "vanished") {
+		t.Errorf("error = %v, want substring 'vanished'", err)
+	}
+	if s.currentNote != "" {
+		t.Errorf("context not cleared after vanish: currentNote=%q", s.currentNote)
 	}
 }
 
