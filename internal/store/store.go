@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 const StoreVersion = 1
@@ -153,27 +154,47 @@ func (v *DecryptedVault) Delete(name string) error {
 }
 
 // NormalizeName lowercases and validates a note name.
-// Allowed: ASCII letters, digits, '-', '_', '.', '/'. Length 1..128.
-// '/' enables hierarchical names like "ai/openai".
+//
+// Allowed:
+//   - any Unicode letter (`unicode.IsLetter`) — covers Latin, CJK,
+//     Cyrillic, Greek, etc., so users can write `password/のりお` or
+//     `работа/email` natively.
+//   - any Unicode decimal digit (`unicode.IsDigit`).
+//   - the four ASCII punctuation marks `-`, `_`, `.`, `/`.
+//
+// Rejected:
+//   - control characters, whitespace (space / tab / newline), and all
+//     symbols / punctuation other than the four above. This blocks
+//     emoji-only names, fullwidth slashes that look like '/' but
+//     aren't, and shell-meaningful chars (`*`, `?`, `$`, etc.) that
+//     would surprise users who pipe note names around.
+//   - leading / trailing / doubled '/' (segment-shape rules).
+//
+// Length is capped at 128 RUNES, not bytes — Japanese is ~3 bytes per
+// char in UTF-8, so a byte limit would let 42-char Japanese names
+// through but reject 129-char ASCII names. Rune count is the
+// user-facing measure.
+//
+// Case folding only meaningfully affects ASCII letters
+// (`strings.ToLower` is a no-op for scripts without case like
+// Hiragana/Katakana/Kanji), so case-insensitive lookup of `OPENAI`
+// vs `openai` keeps working without affecting non-Latin names.
 func NormalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("note name is empty")
 	}
 	name = strings.ToLower(name)
-	if len(name) > 128 {
-		return "", errors.New("note name too long (max 128 chars)")
+	if utf8.RuneCountInString(name) > 128 {
+		return "", errors.New("note name too long (max 128 runes)")
 	}
 	if strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.Contains(name, "//") {
 		return "", errors.New("invalid note name: bad use of '/'")
 	}
 	for _, r := range name {
-		if r > unicode.MaxASCII {
-			return "", fmt.Errorf("invalid character in name: %q", r)
-		}
 		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
+		case unicode.IsLetter(r):
+		case unicode.IsDigit(r):
 		case r == '-' || r == '_' || r == '.' || r == '/':
 		default:
 			return "", fmt.Errorf("invalid character in name: %q", r)

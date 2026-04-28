@@ -30,19 +30,36 @@ func TestNormalizeName(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
+		// ASCII (legacy contract — must keep working)
 		"openai":         {"openai", false},
 		"OpenAI":         {"openai", false},
 		"  openai  ":     {"openai", false},
 		"ai/openai":      {"ai/openai", false},
 		"server/fw0.tld": {"server/fw0.tld", false},
 		"a-b_c.d":        {"a-b_c.d", false},
-		"":               {"", true},
-		"/leading":       {"", true},
-		"trailing/":      {"", true},
-		"a//b":           {"", true},
-		"has space":      {"", true},
-		"日本語":            {"", true},
-		"a$b":            {"", true},
+
+		// rejected shapes (unchanged)
+		"":          {"", true},
+		"/leading":  {"", true},
+		"trailing/": {"", true},
+		"a//b":      {"", true},
+		"has space": {"", true}, // whitespace inside still rejected
+		"a$b":       {"", true}, // shell-meaningful chars still rejected
+
+		// non-ASCII letters (now allowed — Japanese / Cyrillic / Greek)
+		"日本語":          {"日本語", false},
+		"password/のりお": {"password/のりお", false},
+		"работа/почта": {"работа/почта", false},
+		"alpha/βeta":   {"alpha/βeta", false},
+		"login/ω":      {"login/ω", false},
+
+		// emoji / pure symbols still rejected (not Letter/Digit)
+		"login/🔑": {"", true},
+		"a★b":     {"", true},
+
+		// fullwidth slash that looks like '/' but isn't — reject so
+		// hierarchy semantics aren't quietly broken
+		"a／b": {"", true},
 	}
 	for in, c := range cases {
 		got, err := NormalizeName(in)
