@@ -1,0 +1,212 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// withTempVaultDir runs fn with a temp vault dir and restores HOME
+// before returning. Returns the temp dir path so the test can drop
+// fixture files into it.
+func withTempVaultDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	return filepath.Join(dir, ".kpot")
+}
+
+func TestResolveVault_EmptyArgAndNoDefault(t *testing.T) {
+	_, err := ResolveVault("", Config{})
+	if err == nil {
+		t.Fatal("expected error when no arg and no default_vault")
+	}
+	if !strings.Contains(err.Error(), "no vault specified") {
+		t.Errorf("error message = %q, want substring 'no vault specified'", err.Error())
+	}
+}
+
+func TestResolveVault_EmptyArgWithDefault(t *testing.T) {
+	dir := withTempVaultDir(t)
+	got, err := ResolveVault("", Config{DefaultVault: "personal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "personal.kpot")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveVault_AbsolutePath(t *testing.T) {
+	got, err := ResolveVault("/abs/path/to/v.kpot", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/abs/path/to/v.kpot" {
+		t.Errorf("got %q, want passthrough", got)
+	}
+}
+
+func TestResolveVault_PathLikeRelative(t *testing.T) {
+	// Anything containing / passes through — no .kpot appended,
+	// no vault_dir applied. The user told us where to look.
+	got, err := ResolveVault("../neighbour/v.kpot", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "../neighbour/v.kpot" {
+		t.Errorf("got %q, want passthrough", got)
+	}
+}
+
+func TestResolveVault_PathLikePreservedEvenWithoutSuffix(t *testing.T) {
+	// `dir/vault` (no .kpot) is still treated as a path: user gave
+	// us a directory hint, don't append .kpot or vault-dir prefix.
+	got, err := ResolveVault("dir/vault", Config{VaultDir: "/tmp/kp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "dir/vault" {
+		t.Errorf("got %q, want passthrough", got)
+	}
+}
+
+func TestResolveVault_AppendsKpotSuffix(t *testing.T) {
+	withTempVaultDir(t)
+	got, err := ResolveVault("personal", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, "/personal.kpot") {
+		t.Errorf("got %q, want suffix '/personal.kpot'", got)
+	}
+}
+
+func TestResolveVault_PrefersCWDFileIfExists(t *testing.T) {
+	// Create a `personal.kpot` in CWD; resolver should pick it up
+	// instead of jumping to vault_dir.
+	tmp := withTempVaultDir(t)
+	cwd, err := os.MkdirTemp("", "kpot-cwd-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(cwd)
+
+	// Make a fake vault file in cwd.
+	fake := filepath.Join(cwd, "personal.kpot")
+	if err := os.WriteFile(fake, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// chdir for the duration of this test.
+	prev, _ := os.Getwd()
+	defer os.Chdir(prev)
+	os.Chdir(cwd)
+
+	got, err := ResolveVault("personal", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "personal.kpot" {
+		t.Errorf("got %q, want CWD file 'personal.kpot' (vault_dir would have been %s)", got, tmp)
+	}
+}
+
+func TestResolveVault_FallsBackToVaultDir(t *testing.T) {
+	dir := withTempVaultDir(t)
+	got, err := ResolveVault("work", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "work.kpot")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveVault_ExplicitVaultDir(t *testing.T) {
+	custom := t.TempDir()
+	got, err := ResolveVault("alt", Config{VaultDir: custom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(custom, "alt.kpot")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveVault_KpotSuffixNotDoubled(t *testing.T) {
+	withTempVaultDir(t)
+	// `kpot vault.kpot` (bare name with .kpot suffix already) must
+	// NOT become `vault.kpot.kpot`.
+	got, err := ResolveVault("vault.kpot", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasSuffix(got, ".kpot.kpot") {
+		t.Errorf("double suffix in %q", got)
+	}
+}
+
+func TestResolveVault_TrimsWhitespace(t *testing.T) {
+	withTempVaultDir(t)
+	got, err := ResolveVault("  personal  ", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, "/personal.kpot") {
+		t.Errorf("got %q, want suffix '/personal.kpot'", got)
+	}
+}
+
+// --- LoadFrom: ~ expansion in vault_dir ---
+
+func TestLoadFrom_ExpandsTildeInVaultDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`vault_dir = "~/secrets"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "secrets")
+	if cfg.VaultDir != want {
+		t.Errorf("vault_dir = %q, want %q", cfg.VaultDir, want)
+	}
+}
+
+func TestLoadFrom_AbsoluteVaultDirPassesThrough(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`vault_dir = "/srv/kpot"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VaultDir != "/srv/kpot" {
+		t.Errorf("vault_dir = %q, want /srv/kpot", cfg.VaultDir)
+	}
+}
+
+// --- EnsureVaultDir ---
+
+func TestEnsureVaultDirCreatesParent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "nested", "sub", "vault.kpot")
+	if err := EnsureVaultDir(target); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(target)
+	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+		t.Fatalf("parent dir not created: %v", err)
+	}
+}

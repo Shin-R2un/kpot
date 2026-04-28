@@ -95,9 +95,20 @@ func run(args []string) error {
 	}
 	editor.Default = cfg.Editor
 
+	// Bare `kpot` with no args: open the configured default vault if
+	// one is set, otherwise print usage. This makes `kpot` a one-key
+	// shortcut for the user's primary vault when default_vault is in
+	// config.toml.
 	if len(args) == 0 {
-		fmt.Print(usage)
-		return nil
+		if cfg.DefaultVault == "" {
+			fmt.Print(usage)
+			return nil
+		}
+		path, err := config.ResolveVault("", cfg)
+		if err != nil {
+			return err
+		}
+		return cmdOpen(path, cfg, false)
 	}
 	switch args[0] {
 	case "help", "-h", "--help":
@@ -107,11 +118,18 @@ func run(args []string) error {
 		fmt.Println(version)
 		return nil
 	case "init":
-		return cmdInit(args[1:])
+		return cmdInit(args[1:], cfg)
 	case "keychain":
 		return cmdKeychain(args[1:], cfg)
 	default:
-		path := args[0]
+		// Resolve a bare name like `personal` to <vault_dir>/personal.kpot
+		// (or to a CWD file if one exists by that name). Path-like
+		// inputs (`./vault.kpot`, `/abs/v.kpot`) pass through unchanged
+		// for back-compat.
+		path, err := config.ResolveVault(args[0], cfg)
+		if err != nil {
+			return err
+		}
 		rest := args[1:]
 		// Consume leading flags that apply to the whole invocation
 		// regardless of whether REPL or single-shot follows.
@@ -206,7 +224,7 @@ func forgetCachedKey(path string) error {
 
 // cmdInit creates a new vault. v0.3+ flow: passphrase + always-on
 // recovery key (seed by default, or secret key with --recovery key).
-func cmdInit(args []string) error {
+func cmdInit(args []string, cfg config.Config) error {
 	var (
 		path         string
 		recoveryKind = vault.WrapKindSeed
@@ -254,6 +272,21 @@ func cmdInit(args []string) error {
 	}
 	if path == "" {
 		return errArgs("usage: kpot init <file> [--recovery seed|key] [--recovery-words 12|24]")
+	}
+	// Apply the same name-resolution rules as `kpot <vault>`: a bare
+	// name like `personal` becomes `<vault_dir>/personal.kpot` so init
+	// behaves consistently with subsequent open/single-shot calls.
+	resolved, err := config.ResolveVault(path, cfg)
+	if err != nil {
+		return err
+	}
+	path = resolved
+	// Ensure the parent directory exists so first-time use doesn't
+	// fail with "no such file or directory" — common case for
+	// resolved `~/.kpot/foo.kpot` when the user has never used kpot
+	// before. 0o700 keeps the dir owner-only.
+	if err := config.EnsureVaultDir(path); err != nil {
+		return fmt.Errorf("create vault dir: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("%s already exists. Refusing to overwrite", path)

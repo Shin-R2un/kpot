@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -49,6 +50,21 @@ type Config struct {
 	// Negative is rejected at load time. -1 / "off" semantics: set to
 	// a very large number if you really want effectively-never.
 	IdleLockMinutes int `toml:"idle_lock_minutes"`
+
+	// VaultDir is the directory bare-name vault arguments are resolved
+	// against. `kpot personal` → `<VaultDir>/personal.kpot` when no
+	// matching file exists in CWD. Empty falls back to ~/.kpot. The
+	// `~/` prefix is expanded at load time so callers see an absolute
+	// path. Trailing slashes are tolerated.
+	VaultDir string `toml:"vault_dir"`
+
+	// DefaultVault is the vault opened when the user runs bare `kpot`
+	// with no positional argument. The value goes through the same
+	// resolution as a CLI argument: bare names get `.kpot` appended
+	// and resolve under VaultDir; absolute / slash-containing values
+	// are used as-is. Empty means "no default" — bare `kpot` prints
+	// usage as before.
+	DefaultVault string `toml:"default_vault"`
 }
 
 // DefaultIdleLockMinutes is the fallback when config doesn't set a
@@ -131,5 +147,30 @@ func LoadFrom(path string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("config: keychain must be auto | always | never (got %q)", cfg.Keychain)
 	}
+	if expanded, err := expandHome(cfg.VaultDir); err != nil {
+		return Config{}, fmt.Errorf("config: vault_dir: %w", err)
+	} else {
+		cfg.VaultDir = expanded
+	}
 	return cfg, nil
+}
+
+// expandHome converts a leading `~/` or bare `~` into the user's home
+// directory. Other forms (absolute paths, relative paths, empty) pass
+// through unchanged.
+func expandHome(p string) (string, error) {
+	if p == "" {
+		return "", nil
+	}
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if p == "~" {
+			return home, nil
+		}
+		return filepath.Join(home, p[2:]), nil
+	}
+	return p, nil
 }
