@@ -7,8 +7,15 @@ import "strings"
 var commandNames = []string{
 	"ls",
 	"note",
+	"cd",
+	"pwd",
+	"show",
 	"read",
+	"fields",
+	"cp",
 	"copy",
+	"set",
+	"unset",
 	"find",
 	"rm",
 	"template",
@@ -39,18 +46,41 @@ var noteNameCommands = map[string]bool{
 	"copy":   true,
 	"rm":     true,
 	"bundle": true,
+	"cd":     true,
+}
+
+// fieldOrNoteCommands name the commands whose first argument can be
+// either a field of the current note OR a note name (note name wins
+// at runtime). The completer offers the union: current-note field
+// names first, then note names.
+var fieldOrNoteCommands = map[string]bool{
+	"show": true,
+	"cp":   true,
+}
+
+// fieldOnlyCommands name the commands whose first argument is always
+// a field of the current note (set / unset). Completion only offers
+// field names — nothing else makes sense in those positions.
+var fieldOnlyCommands = map[string]bool{
+	"set":   true,
+	"unset": true,
 }
 
 // nameLister returns the live set of completable note names. Captured
 // by closure so adds/deletes during the session show up immediately.
 type nameLister func() []string
 
+// fieldLister returns the field-key list for the current note, or
+// nil when no current note is set. Captured by closure so cd / set /
+// unset all see the up-to-date field set without explicit refresh.
+type fieldLister func() []string
+
 // wordComplete implements peterh/liner's WordCompleter contract:
 // given a line and a cursor position it returns the prefix to keep,
 // the candidate completions for the word at the cursor, and the
 // suffix to keep. The returned candidates already include any required
 // trailing space (for commands) but no quoting.
-func wordComplete(line string, pos int, names nameLister) (head string, completions []string, tail string) {
+func wordComplete(line string, pos int, names nameLister, currentFields fieldLister) (head string, completions []string, tail string) {
 	if pos > len(line) {
 		pos = len(line)
 	}
@@ -89,6 +119,41 @@ func wordComplete(line string, pos int, names nameLister) (head string, completi
 		}
 		return head, completions, tail
 	}
+
+	// Commands that take a field name in arg position: field-only
+	// (set / unset) get just the current note's field keys; field-or-
+	// note commands (show / cp) get fields first then note names so
+	// the most contextually relevant options surface at the top.
+	if fieldOnlyCommands[cmd] {
+		if currentFields != nil {
+			for _, f := range currentFields() {
+				if strings.HasPrefix(f, wordPrefix) {
+					completions = append(completions, f)
+				}
+			}
+		}
+		return head, completions, tail
+	}
+	if fieldOrNoteCommands[cmd] {
+		seen := make(map[string]bool, 8)
+		if currentFields != nil {
+			for _, f := range currentFields() {
+				if strings.HasPrefix(f, wordPrefix) {
+					completions = append(completions, f)
+					seen[f] = true
+				}
+			}
+		}
+		if names != nil {
+			for _, n := range names() {
+				if strings.HasPrefix(n, wordPrefix) && !seen[n] {
+					completions = append(completions, n)
+				}
+			}
+		}
+		return head, completions, tail
+	}
+
 	if !noteNameCommands[cmd] {
 		return head, nil, tail
 	}

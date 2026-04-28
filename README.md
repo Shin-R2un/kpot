@@ -83,17 +83,30 @@ kpot personal.kpot               # open REPL with passphrase (everyday)
 kpot personal.kpot --recover     # open REPL with the recovery seed
                                  # (emergency only — then run `passphrase`)
 
-kpot:personal> help              # full command list
-kpot:personal> note ai/openai    # create new note (or open existing)
-kpot:personal> ls                # list note names
-kpot:personal> read ai/openai    # print the body to stdout
-kpot:personal> copy ai/openai    # → clipboard, auto-clears (30s default)
-kpot:personal> find openai       # case-insensitive name + body search
-kpot:personal> rm  ai/openai     # asks "remove note 'ai/openai'? [y/N]"
-kpot:personal> template show     # inspect new-note template
-kpot:personal> template          # edit the template in $EDITOR
-kpot:personal> passphrase        # rotate this vault's passphrase
-kpot:personal> export            # print decrypted JSON to stdout
+kpot:personal> help                 # full command list
+kpot:personal> note ai/openai       # create new note (or open existing)
+kpot:personal> ls                   # list note names
+kpot:personal> find openai          # case-insensitive name + body search
+kpot:personal> rm  ai/openai        # asks "remove note 'ai/openai'? [y/N]"
+
+# v0.6: cd into a note and use context-aware commands
+kpot:personal> cd ai/openai         # enter note context (prompt updates)
+kpot:personal/ai/openai> show       # print the whole body
+kpot:personal/ai/openai> show url   # print just the `url:` field
+kpot:personal/ai/openai> fields     # list field keys (id, url, apikey, …)
+kpot:personal/ai/openai> cp apikey  # copy that field's value to clipboard
+kpot:personal/ai/openai> set url https://api.openai.com   # update field
+kpot:personal/ai/openai> set apikey                       # secret prompt
+kpot:personal/ai/openai> unset old_field
+kpot:personal/ai/openai> cd ..      # leave context (cd / works too)
+
+# Original commands still work and are unchanged
+kpot:personal> read ai/openai       # print the body to stdout
+kpot:personal> copy ai/openai       # → clipboard, auto-clears (30s default)
+kpot:personal> template show        # inspect new-note template
+kpot:personal> template             # edit the template in $EDITOR
+kpot:personal> passphrase           # rotate this vault's passphrase
+kpot:personal> export               # print decrypted JSON to stdout
 kpot:personal> exit
 ```
 
