@@ -7,13 +7,16 @@ import (
 	"testing"
 )
 
-// withTempVaultDir runs fn with a temp vault dir and restores HOME
-// before returning. Returns the temp dir path so the test can drop
-// fixture files into it.
+// withTempVaultDir installs a fake home directory for the duration of
+// t and returns the resolved <home>/.kpot path. Both HOME (Unix) and
+// USERPROFILE (Windows) are pinned because Go's os.UserHomeDir
+// consults different env vars per platform — pinning only HOME passes
+// on Linux/macOS and silently leaks the runner's real home on Windows.
 func withTempVaultDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	return filepath.Join(dir, ".kpot")
 }
 
@@ -79,8 +82,9 @@ func TestResolveVault_AppendsKpotSuffix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(got, "/personal.kpot") {
-		t.Errorf("got %q, want suffix '/personal.kpot'", got)
+	// filepath.Base() so the assertion holds on Windows (\) too.
+	if filepath.Base(got) != "personal.kpot" {
+		t.Errorf("got %q, want basename 'personal.kpot'", got)
 	}
 }
 
@@ -157,8 +161,8 @@ func TestResolveVault_TrimsWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(got, "/personal.kpot") {
-		t.Errorf("got %q, want suffix '/personal.kpot'", got)
+	if filepath.Base(got) != "personal.kpot" {
+		t.Errorf("got %q, want basename 'personal.kpot'", got)
 	}
 }
 
@@ -167,6 +171,7 @@ func TestResolveVault_TrimsWhitespace(t *testing.T) {
 func TestLoadFrom_ExpandsTildeInVaultDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte(`vault_dir = "~/secrets"`), 0o600); err != nil {
 		t.Fatal(err)
@@ -184,7 +189,11 @@ func TestLoadFrom_ExpandsTildeInVaultDir(t *testing.T) {
 func TestLoadFrom_AbsoluteVaultDirPassesThrough(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	cfgPath := filepath.Join(dir, "config.toml")
+	// Use a Windows-friendly absolute path: starting with /
+	// works on Unix, and on Windows it stays the same string
+	// because expandHome only acts on `~/` prefixes.
 	if err := os.WriteFile(cfgPath, []byte(`vault_dir = "/srv/kpot"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
