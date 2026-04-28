@@ -14,8 +14,12 @@ disclose privately first.
    - Your OS / arch / Go version (if relevant)
    - Reproduction steps or PoC
    - Your assessment of the impact
-3. We'll respond within **7 days** with an acknowledgement and an
-   initial triage assessment.
+3. We aim to acknowledge within **7 days** with an initial triage
+   assessment. kpot is currently a single-author project, so for
+   particularly busy stretches (vacation, illness) the
+   acknowledgement may take up to **14 days** — we will always
+   respond, even if late. If you have heard nothing after 14 days,
+   please ping the backup channel below.
 
 ### Backup channel
 
@@ -25,7 +29,8 @@ PGP key fingerprints will be published here once available.
 
 ## Disclosure timeline
 
-- **Day 0**: Report received, acknowledgement within 7 days.
+- **Day 0**: Report received, acknowledgement aimed at within 7 days
+  (single-author best-effort, max 14 days).
 - **Day 0–14**: Triage. Severity assessment (CVSS or qualitative).
 - **Day 14–60**: Fix developed and tested in a private branch.
   Coordinated disclosure date agreed with the reporter.

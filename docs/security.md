@@ -35,7 +35,9 @@ The vault file is **encrypted at rest** with XChaCha20-Poly1305
 (authenticated encryption with associated data). Without the
 passphrase or the recovery seed, the file is opaque ciphertext.
 
-- **Cipher**: XChaCha20-Poly1305 (RFC 8439 + 24-byte XChaCha20 nonce).
+- **Cipher**: XChaCha20-Poly1305 (IETF
+  [draft-irtf-cfrg-xchacha](https://datatracker.ietf.org/doc/draft-irtf-cfrg-xchacha/),
+  which extends RFC 8439's ChaCha20-Poly1305 to a 24-byte nonce).
   Standard, peer-reviewed AEAD construction.
 - **KDF**: Argon2id, defaults `memory=64 MiB, iterations=3, parallelism=1`.
   Memory-hard, resists GPU/ASIC offline attacks better than PBKDF2/scrypt.
@@ -115,8 +117,7 @@ What kpot does:
 - For the few unavoidable conversions (e.g., BIP-39's
   `IsMnemonicValid(string)`), comments mark them as best-effort.
 
-What kpot does **not** do (yet — see
-[kpot-ideas.html #24](../kpot-ideas.html)):
+What kpot does **not** do (yet — tracked as planned work):
 
 - `mlock(2)` / `VirtualLock` to prevent swap-out.
 - Locked memory pools for sensitive allocations.
@@ -165,7 +166,7 @@ What you can do today:
   do this automatically).
 - Build from source: `git clone … && go build ./cmd/kpot`.
 
-What's planned (see [kpot-ideas.html #21–23](../kpot-ideas.html)):
+What's planned (no fixed timeline, but on the roadmap):
 
 - Sigstore / cosign signed releases.
 - SLSA provenance attestations.
@@ -193,8 +194,9 @@ What's planned (see [kpot-ideas.html #21–23](../kpot-ideas.html)):
   (the `id` variant blends `i` and `d` modes).
 
 Defaults (`memory=64 MiB, iterations=3`) target ~0.5 s on a 2020-era
-laptop. Tweak via the planned `--argon2-target` flag (see
-[kpot-ideas.html #18](../kpot-ideas.html) — auto-calibration).
+laptop. The parameters are currently fixed at the values stated above;
+auto-calibration via a `--argon2-target` flag is planned but **not yet
+shipped**, so do not rely on it being available in v0.5.x.
 
 ### Why BIP-39 for the recovery seed?
 
@@ -240,9 +242,13 @@ and versioned in the file's `version` field.
 forever (no auto-downgrade); v1 vaults are upgraded to v2 the
 first time the passphrase is rotated or the recovery flow is used.
 
-Format changes go through a **deprecation period of at least 6
-months** before a reading version is removed. Any breaking change
-will be called out in release notes with explicit migration steps.
+As long as kpot remains pre-1.0 (v0.x), the on-disk format may
+change without a fixed deprecation window — any breaking change
+will be called out in release notes with explicit migration steps,
+and the previous reader will be retained for at least one minor
+version where practical. Once kpot reaches v1.0, format changes
+will carry a **deprecation period of at least 6 months** before
+the older reader is removed.
 
 ## Reporting suspected issues
 
