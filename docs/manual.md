@@ -1,14 +1,15 @@
 # kpot ユーザーマニュアル
 
-> **バージョン**: 0.8.0  
-> **最終更新**: 2026-04-29  
+> **バージョン**: 0.9.0<br>
+> **最終更新**: 2026-04-29<br>
 > **リポジトリ**: https://github.com/Shin-R2un/kpot
 >
-> v0.5.0 → v0.8.0 の追加点:
+> v0.5.0 → v0.9.0 の追加点:
 > - **v0.6**: REPL コンテキスト UX (`cd` / `show` / `fields` / `cp` / `set` / `unset`)
 > - **v0.6.1**: ノート名で Unicode 対応 (日本語 / キリル / ギリシャ等)
 > - **v0.7**: `vault_dir` + `default_vault` でベアネーム解決と既定 vault
 > - **v0.8**: `kpot config init/show/path` サブコマンド
+> - **v0.9**: `kpot serve` read-only mobile WebUI
 
 ---
 
@@ -577,10 +578,12 @@ vault_dir = "/home/shin/.kpot"
 
 ### 4.7 serve サブコマンド (v0.9+)
 
-スマホからの read-only WebUI。SSH トンネル + VPN 経由でアクセスする前提。
+スマホからの read-only WebUI。既定は SSH トンネル向けに `127.0.0.1`
+へ bind します。上級者向けに、特定の VPN/Tailscale インターフェース IP
+だけを `--bind` で指定できます。
 
 ```
-kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
+kpot serve <name|file> [--bind ADDR] [--port 8765] [--idle 30] [--no-cache]
 ```
 
 ```bash
@@ -601,7 +604,9 @@ ssh -L 8765:127.0.0.1:8765 user@fw0
 - OS keychain にキャッシュがあれば daemon 起動時に silent unlock (`--no-cache` で無効化可能)
 
 セキュリティ:
-- `127.0.0.1` のみ bind (`--bind 0.0.0.0` フラグは意図的に無し)
+- 既定は `127.0.0.1` bind (SSH トンネルが transport 境界)
+- `--bind` は特定の VPN/Tailscale インターフェース IP 用
+- wildcard bind (`0.0.0.0`, `::`) は拒否
 - 完全 read-only (ノート編集は引き続き REPL/CLI)
 - session cookie は HttpOnly + SameSite=Strict
 - login rate limit (3 fail / 60s → 30s lockout)
@@ -1145,5 +1150,5 @@ Wrong passphrase, or the file is corrupted
 
 ---
 
-*このマニュアルは kpot v0.5.0 に基づいています。*  
+*このマニュアルは kpot v0.9.0 に基づいています。*<br>
 *最新情報は https://github.com/Shin-R2un/kpot を参照してください。*

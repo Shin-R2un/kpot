@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -449,5 +450,50 @@ func TestBootstrapAutoMintsSessionForCookielessRequests(t *testing.T) {
 	}
 	if !gotCookie {
 		t.Errorf("bootstrap should mint a cookie; got none")
+	}
+}
+
+func TestBindAddressClassification(t *testing.T) {
+	tests := []struct {
+		host     string
+		loopback bool
+		wildcard bool
+	}{
+		{"", true, false},
+		{"localhost", true, false},
+		{"127.0.0.1", true, false},
+		{"::1", true, false},
+		{"10.0.0.1", false, false},
+		{"100.64.0.1", false, false},
+		{"0.0.0.0", false, true},
+		{"::", false, true},
+		{"vpn.example", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := isLoopback(tt.host); got != tt.loopback {
+				t.Errorf("isLoopback(%q)=%v want %v", tt.host, got, tt.loopback)
+			}
+			if got := isWildcard(tt.host); got != tt.wildcard {
+				t.Errorf("isWildcard(%q)=%v want %v", tt.host, got, tt.wildcard)
+			}
+		})
+	}
+}
+
+func TestRunRejectsWildcardBind(t *testing.T) {
+	err := Run(Options{
+		VaultPath: "unused.kpot",
+		BindAddr:  "0.0.0.0",
+		NoCache:   true,
+	})
+	if err == nil {
+		t.Fatal("expected wildcard bind to be rejected")
+	}
+	if !strings.Contains(err.Error(), "refusing wildcard bind") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Run should reject before starting server: %v", err)
 	}
 }

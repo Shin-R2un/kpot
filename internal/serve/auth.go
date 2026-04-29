@@ -127,12 +127,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// No Secure flag: kpot serve binds plain HTTP to 127.0.0.1
-		// only and the cookie's privacy hinges on the SSH tunnel
-		// boundary, not on TLS. Adding Secure here would prevent
-		// the cookie from sticking under plain HTTP (cookiejars
-		// follow RFC 6265 and refuse to persist Secure cookies
-		// over non-https), which would defeat the daemon entirely.
+		// No Secure flag: kpot serve is plain HTTP. The cookie's
+		// privacy hinges on the loopback / VPN / SSH-tunnel boundary,
+		// not on TLS. Adding Secure here would prevent the cookie from
+		// sticking under plain HTTP (cookiejars follow RFC 6265 and
+		// refuse to persist Secure cookies over non-https), which
+		// would defeat the daemon entirely.
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

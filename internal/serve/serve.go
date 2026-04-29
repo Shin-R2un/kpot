@@ -1,5 +1,6 @@
-// Package serve hosts the kpot WebUI. One daemon per vault, bound to
-// 127.0.0.1, accessed from a phone via SSH tunnel + VPN.
+// Package serve hosts the kpot WebUI. One daemon per vault. It binds
+// 127.0.0.1 by default for SSH-tunnel access, or a specific VPN
+// interface IP when explicitly requested.
 //
 // Architecture and threat model are documented in docs/serve.md and
 // /home/shin/.claude/plans/kpot-webui-url-id-ssh-vpn-vpn-fw0-ssh-we-distributed-charm.md.
@@ -116,6 +117,9 @@ func Run(opts Options) error {
 	if host == "" {
 		host = "127.0.0.1"
 	}
+	if isWildcard(host) {
+		return fmt.Errorf("serve: refusing wildcard bind %q; use 127.0.0.1 or a specific VPN/Tailscale interface IP", host)
+	}
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -138,11 +142,13 @@ func Run(opts Options) error {
 	}
 
 	fmt.Fprintf(os.Stderr,
-		"kpot serve: %s — http://localhost:%d/  (Ctrl-C to stop)\n",
-		opts.VaultPath, port)
-	fmt.Fprintf(os.Stderr,
-		"  SSH tunnel from your phone:\n    ssh -L %d:127.0.0.1:%d user@<this host>\n",
-		port, port)
+		"kpot serve: %s — http://%s/  (Ctrl-C to stop)\n",
+		opts.VaultPath, net.JoinHostPort(displayHost(host), fmt.Sprintf("%d", port)))
+	if isLoopback(host) {
+		fmt.Fprintf(os.Stderr,
+			"  SSH tunnel from your phone:\n    ssh -L %d:127.0.0.1:%d user@<this host>\n",
+			port, port)
+	}
 
 	// Catch SIGINT/SIGTERM for graceful shutdown.
 	idleConnsClosed := make(chan struct{})
@@ -183,6 +189,18 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+func isWildcard(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
+}
+
+func displayHost(host string) string {
+	if host == "" {
+		return "127.0.0.1"
+	}
+	return host
 }
 
 // mux builds the http.ServeMux. Exposed as a method so tests can wrap

@@ -487,8 +487,10 @@ and are unaffected. Adjust the period via `idle_lock_minutes` in
 
 ## Mobile WebUI (v0.9+)
 
-`kpot serve` exposes a read-only web interface bound to `127.0.0.1`,
-designed for phone access via SSH tunnel + VPN.
+`kpot serve` exposes a read-only web interface. It binds to
+`127.0.0.1` by default for phone access via SSH tunnel. Advanced users
+can bind a specific VPN/Tailscale interface IP with `--bind`; wildcard
+binds such as `0.0.0.0` and `::` are refused.
 
 ```bash
 # On the host (e.g. your home server):
@@ -510,7 +512,8 @@ Features:
 
 Security:
 
-- Listens on `127.0.0.1` only; no `--bind` flag (SSH tunnel is the auth boundary)
+- Default bind is `127.0.0.1`; `--bind` is only for a specific trusted VPN/Tailscale interface IP
+- Wildcard binds (`0.0.0.0`, `::`) are refused
 - Read-only — no edit endpoints, REPL stays the edit surface
 - Session cookies are HttpOnly + SameSite=Strict
 - Login rate-limited (3 fails / 60s → 30s lockout)
