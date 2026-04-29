@@ -58,6 +58,9 @@ Config file:
                                  editor                  (overrides $EDITOR)
                                  clipboard_clear_seconds (default: 30)
                                  keychain                ("auto" | "always" | "never", default: auto)
+                                 idle_lock_minutes       (REPL idle close, default: 10)
+                                 vault_dir               (where bare-name args resolve, default: ~/.kpot)
+                                 default_vault           (opened by bare 'kpot' with no args)
 
 Recovery model:
   Every vault created with v0.3+ comes with a recovery key (seed phrase
@@ -79,7 +82,7 @@ Examples:
 // version is the released build version. Overridden at link time by
 // goreleaser via -ldflags "-X main.version=...". Unreleased builds keep
 // the in-tree placeholder so `kpot version` still prints something useful.
-var version = "0.5.0-dev"
+var version = "0.7.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

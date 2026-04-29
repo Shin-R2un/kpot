@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -88,23 +89,48 @@ func TestResolveVault_AppendsKpotSuffix(t *testing.T) {
 	}
 }
 
-func TestResolveVault_PrefersCWDFileIfExists(t *testing.T) {
-	// Create a `personal.kpot` in CWD; resolver should pick it up
-	// instead of jumping to vault_dir.
-	tmp := withTempVaultDir(t)
+func TestResolveVault_PrefersCWDFileWhenSuffixExplicit(t *testing.T) {
+	// User typed `kpot personal.kpot` (suffix explicit) and there's
+	// a matching file in CWD → use it. This is the legacy
+	// `cd /repo && kpot vault.kpot` workflow.
+	withTempVaultDir(t)
 	cwd, err := os.MkdirTemp("", "kpot-cwd-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(cwd)
-
-	// Make a fake vault file in cwd.
 	fake := filepath.Join(cwd, "personal.kpot")
 	if err := os.WriteFile(fake, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	prev, _ := os.Getwd()
+	defer os.Chdir(prev)
+	os.Chdir(cwd)
 
-	// chdir for the duration of this test.
+	got, err := ResolveVault("personal.kpot", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "personal.kpot" {
+		t.Errorf("got %q, want CWD file 'personal.kpot'", got)
+	}
+}
+
+func TestResolveVault_BareNameSkipsCWDPhishingDefense(t *testing.T) {
+	// Critical security regression test:
+	// User typed `kpot personal` (BARE name) — must NOT pick up a
+	// `personal.kpot` shipped by an unrelated repo in the user's
+	// CWD. That would let a cloned project shadow the real vault.
+	dir := withTempVaultDir(t)
+	cwd, err := os.MkdirTemp("", "kpot-malicious-cwd-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(cwd)
+	bait := filepath.Join(cwd, "personal.kpot")
+	if err := os.WriteFile(bait, []byte("attacker-controlled"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	prev, _ := os.Getwd()
 	defer os.Chdir(prev)
 	os.Chdir(cwd)
@@ -113,8 +139,23 @@ func TestResolveVault_PrefersCWDFileIfExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "personal.kpot" {
-		t.Errorf("got %q, want CWD file 'personal.kpot' (vault_dir would have been %s)", got, tmp)
+	want := filepath.Join(dir, "personal.kpot")
+	if got != want {
+		t.Errorf("bare-name resolution leaked into CWD: got %q, want %q", got, want)
+	}
+}
+
+func TestResolveVault_ExpandsTildeInCLIArg(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	got, err := ResolveVault("~/vaults/work.kpot", Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "vaults/work.kpot")
+	if got != want {
+		t.Errorf("got %q, want %q (tilde-expanded path-like arg)", got, want)
 	}
 }
 
@@ -209,13 +250,49 @@ func TestLoadFrom_AbsoluteVaultDirPassesThrough(t *testing.T) {
 // --- EnsureVaultDir ---
 
 func TestEnsureVaultDirCreatesParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission semantics don't apply on Windows")
+	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "nested", "sub", "vault.kpot")
 	if err := EnsureVaultDir(target); err != nil {
 		t.Fatal(err)
 	}
 	parent := filepath.Dir(target)
-	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+	info, err := os.Stat(parent)
+	if err != nil || !info.IsDir() {
 		t.Fatalf("parent dir not created: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("permissions = %o, want 0700 (owner-only)", got)
+	}
+}
+
+func TestEnsureVaultDirTightensExistingDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission semantics don't apply on Windows")
+	}
+	// Simulate a pre-existing ~/.kpot/ created by some other tool
+	// with a permissive mode (0o755). EnsureVaultDir must clamp it
+	// back to 0o700 so other users on the box can't enumerate
+	// vault filenames.
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "kp")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Force the actual mode bits even if umask masked some.
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureVaultDir(filepath.Join(parent, "v.kpot")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("permissions after EnsureVaultDir = %o, want 0700 (clamped)", got)
 	}
 }

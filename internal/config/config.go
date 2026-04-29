@@ -155,6 +155,12 @@ func LoadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
+// ExpandHome converts a leading `~/` or bare `~` into the user's home
+// directory. Other forms (absolute paths, relative paths, empty) pass
+// through unchanged. Exported so cmd/kpot can normalize CLI args
+// the same way config.toml values are normalized at load time.
+func ExpandHome(p string) (string, error) { return expandHome(p) }
+
 // expandHome converts a leading `~/` or bare `~` into the user's home
 // directory. Other forms (absolute paths, relative paths, empty) pass
 // through unchanged.

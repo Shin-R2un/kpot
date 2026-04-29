@@ -84,6 +84,27 @@ passphrase.
 `read` writes to stdout (your choice — convenient but visible);
 prefer `copy` for "show but don't display."
 
+### 4. Vault directory metadata exposure
+
+Since v0.7, bare-name vault arguments resolve under
+`~/.kpot/` by default (configurable via `vault_dir`). kpot enforces
+mode `0o700` on this directory at `init` time, so other users on the
+same machine cannot enumerate or read the files. **What this directory
+still leaks if it's reachable through some other channel** (a backup
+script with permissive ACLs, a sync tool misconfiguration, an
+unencrypted external drive):
+
+- The set of vault names you have (e.g., `personal.kpot`,
+  `work.kpot`, `parents.kpot`).
+- Per-vault file size, which correlates loosely with note count.
+- File modification timestamps.
+
+The vault contents themselves stay encrypted — Argon2id + XChaCha20-
+Poly1305 holds. But if the metadata above is sensitive in your
+context, set `vault_dir` to a path with stronger access controls
+(e.g., a tmpfs at `/run/user/<uid>/kpot`, an encrypted external
+mount, or a per-vault location with its own permissions).
+
 ## What kpot explicitly does **not** defend against
 
 ### 1. A compromised host
