@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Shin-R2un/kpot/internal/config"
 	"github.com/Shin-R2un/kpot/internal/crypto"
@@ -14,6 +16,7 @@ import (
 	"github.com/Shin-R2un/kpot/internal/keychain"
 	"github.com/Shin-R2un/kpot/internal/recovery"
 	"github.com/Shin-R2un/kpot/internal/repl"
+	"github.com/Shin-R2un/kpot/internal/serve"
 	"github.com/Shin-R2un/kpot/internal/store"
 	"github.com/Shin-R2un/kpot/internal/tty"
 	"github.com/Shin-R2un/kpot/internal/vault"
@@ -40,6 +43,9 @@ Usage:
   kpot config init [--force]   Write a starter config.toml at the OS-default path
   kpot config show             Print the effective configuration (file + defaults)
   kpot config path             Print the OS-default config-file path
+  kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
+                               Read-only WebUI for phone access via SSH tunnel.
+                               Binds 127.0.0.1 only. See docs/serve.md.
   kpot help                    Show this help
   kpot version                 Show the version
 
@@ -154,6 +160,8 @@ func run(args []string) error {
 		return cmdKeychain(args[1:], cfg)
 	case "config":
 		return cmdConfig(args[1:], cfg)
+	case "serve":
+		return cmdServe(args[1:], cfg)
 	default:
 		// Resolve a bare name like `personal` to <vault_dir>/personal.kpot
 		// (or to a CWD file if one exists by that name). Path-like
@@ -353,6 +361,80 @@ func cmdConfigShow(cfg config.Config) error {
 		fmt.Printf("default_vault = %q\n", cfg.DefaultVault)
 	}
 	return nil
+}
+
+// cmdServe starts the read-only WebUI for a vault. Usage:
+//
+//	kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
+//
+// The daemon binds 127.0.0.1 only — there's no `--bind` flag on
+// purpose. Phone access is meant to go through an SSH tunnel; binding
+// to 0.0.0.0 would expose plaintext HTTP to the LAN, contradicting
+// docs/security.md's threat model.
+func cmdServe(args []string, cfg config.Config) error {
+	var (
+		path    string
+		port    = 8765
+		idleMin = 30
+		noCache = false
+	)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--port":
+			if i+1 >= len(args) {
+				return errArgs("--port requires a number")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 || n > 65535 {
+				return errArgs(fmt.Sprintf("--port: %q is not a valid port", args[i+1]))
+			}
+			port = n
+			i++
+		case a == "--idle":
+			if i+1 >= len(args) {
+				return errArgs("--idle requires minutes (0 to disable)")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				return errArgs(fmt.Sprintf("--idle: %q must be >= 0", args[i+1]))
+			}
+			idleMin = n
+			i++
+		case a == "--no-cache":
+			noCache = true
+		case strings.HasPrefix(a, "-"):
+			return errArgs(fmt.Sprintf("unknown flag: %s", a))
+		default:
+			if path != "" {
+				return errArgs("at most one vault path is allowed")
+			}
+			path = a
+		}
+	}
+	if path == "" {
+		return errArgs("usage: kpot serve <name|file> [--port N] [--idle M] [--no-cache]")
+	}
+	resolved, err := config.ResolveVault(path, cfg)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		return fmt.Errorf("vault file %q not found. Use 'kpot init %s' to create it", resolved, resolved)
+	}
+	idle := time.Duration(idleMin) * time.Minute
+	if idleMin == 0 {
+		// Sentinel: pass -1 to serve.Run so the session-level timer is
+		// disabled. Run translates 0 to "use default 30 min".
+		idle = -1
+	}
+	return serve.Run(serve.Options{
+		VaultPath: resolved,
+		Port:      port,
+		Idle:      idle,
+		NoCache:   noCache,
+		Cfg:       cfg,
+	})
 }
 
 func cmdKeychainTest(cfg config.Config) error {
