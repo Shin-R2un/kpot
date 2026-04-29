@@ -43,9 +43,11 @@ Usage:
   kpot config init [--force]   Write a starter config.toml at the OS-default path
   kpot config show             Print the effective configuration (file + defaults)
   kpot config path             Print the OS-default config-file path
-  kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
-                               Read-only WebUI for phone access via SSH tunnel.
-                               Binds 127.0.0.1 only. See docs/serve.md.
+  kpot serve <name|file> [--bind ADDR] [--port 8765] [--idle 30] [--no-cache]
+                               Read-only WebUI for phone access. Default binds
+                               127.0.0.1 (use SSH tunnel). --bind <vpn-iface-IP>
+                               for direct VPN access; warns at startup. See
+                               docs/serve.md.
   kpot help                    Show this help
   kpot version                 Show the version
 
@@ -373,14 +375,21 @@ func cmdConfigShow(cfg config.Config) error {
 // docs/security.md's threat model.
 func cmdServe(args []string, cfg config.Config) error {
 	var (
-		path    string
-		port    = 8765
-		idleMin = 30
-		noCache = false
+		path     string
+		bindAddr string
+		port     = 8765
+		idleMin  = 30
+		noCache  = false
 	)
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--bind":
+			if i+1 >= len(args) {
+				return errArgs("--bind requires a host or IP")
+			}
+			bindAddr = args[i+1]
+			i++
 		case a == "--port":
 			if i+1 >= len(args) {
 				return errArgs("--port requires a number")
@@ -413,7 +422,7 @@ func cmdServe(args []string, cfg config.Config) error {
 		}
 	}
 	if path == "" {
-		return errArgs("usage: kpot serve <name|file> [--port N] [--idle M] [--no-cache]")
+		return errArgs("usage: kpot serve <name|file> [--bind ADDR] [--port N] [--idle M] [--no-cache]")
 	}
 	resolved, err := config.ResolveVault(path, cfg)
 	if err != nil {
@@ -430,6 +439,7 @@ func cmdServe(args []string, cfg config.Config) error {
 	}
 	return serve.Run(serve.Options{
 		VaultPath: resolved,
+		BindAddr:  bindAddr,
 		Port:      port,
 		Idle:      idle,
 		NoCache:   noCache,

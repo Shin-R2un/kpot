@@ -30,6 +30,15 @@ type Options struct {
 	// responsible for v0.7+ name resolution.
 	VaultPath string
 
+	// BindAddr is the host or IP the listener binds to. Empty or
+	// "127.0.0.1" is the safe default — access via SSH tunnel only.
+	// Set to a VPN interface IP (e.g. WireGuard wg0 / Tailscale)
+	// for direct phone access without an SSH tunnel. Anything other
+	// than 127.0.0.1 / ::1 / localhost triggers a stderr WARNING at
+	// startup so users know they've left the loopback default
+	// deliberately.
+	BindAddr string
+
 	// Port is the TCP port to listen on. 0 means use 8765.
 	Port int
 
@@ -103,10 +112,22 @@ func Run(opts Options) error {
 
 	mux := s.mux()
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	host := opts.BindAddr
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	if !isLoopback(host) {
+		fmt.Fprintln(os.Stderr,
+			"⚠️  WARNING: kpot serve is bound to "+host+" (non-loopback).")
+		fmt.Fprintln(os.Stderr,
+			"   Plain HTTP — only safe behind a trusted transport (VPN, Tailscale, SSH tunnel).")
+		fmt.Fprintln(os.Stderr,
+			"   Verify UFW / firewall restricts inbound 8765 to your phone's VPN IP only.")
 	}
 
 	srv := &http.Server{
@@ -147,6 +168,21 @@ func Run(opts Options) error {
 	}
 	<-idleConnsClosed
 	return nil
+}
+
+// isLoopback reports whether host resolves to a loopback interface.
+// "localhost" is treated as loopback by name. IP literals are parsed
+// and IsLoopback consulted. Anything else (DNS names that resolve
+// to non-loopback, LAN IPs, 0.0.0.0) is reported as non-loopback —
+// caller logs the WARNING.
+func isLoopback(host string) bool {
+	if host == "" || host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // mux builds the http.ServeMux. Exposed as a method so tests can wrap

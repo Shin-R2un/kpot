@@ -70,6 +70,62 @@ re-consulted for re-auth — only the initial cookie mint.
 If the keychain has no cached DEK, the user types the passphrase at
 the web form on first visit.
 
+## Two access patterns
+
+The daemon supports two deployment shapes. Pick one:
+
+### Pattern A — SSH tunnel (default, simplest setup)
+
+Daemon binds `127.0.0.1` only. Phone connects via an SSH client app
+that forwards `localhost:8765` to the daemon.
+
+```bash
+# Host
+kpot serve 1pswd            # binds 127.0.0.1:8765 by default
+
+# Phone (Termius / Blink / a-Shell etc.)
+ssh -L 8765:127.0.0.1:8765 user@host
+# → mobile Safari: http://localhost:8765/
+```
+
+Pros: zero firewall changes, plaintext HTTP wrapped in SSH transport.
+Cons: SSH session has to stay alive; reconnect on iOS background drop.
+
+### Pattern B — Direct VPN access (Safari-only UX)
+
+Daemon binds the VPN-interface IP. Phone reaches it directly through
+WireGuard / Tailscale / OpenVPN. **Plain HTTP** so the VPN itself
+must provide transport encryption (WireGuard's ChaCha20-Poly1305 does).
+
+```bash
+# Host (one-time)
+sudo ufw allow in on wg0 to any port 8765 proto tcp
+# (or restrict to a single phone source: `... from 10.0.0.5`)
+
+# Host (daemon)
+kpot serve 1pswd --bind 10.0.0.1   # ← FW0's WireGuard interface IP
+
+# Phone
+# 1. Tap WireGuard VPN ON
+# 2. Open bookmark: http://10.0.0.1:8765/
+```
+
+Pros: Safari-only daily UX (one tap WG ON, one tap bookmark).
+Cons: requires VPN setup + firewall hygiene. Misconfigured UFW = LAN exposure.
+
+Required hygiene:
+- Bind to the **VPN interface IP**, not `0.0.0.0`. The daemon literally
+  cannot accept connections from non-VPN paths if bound to `wg0`'s IP.
+- UFW rule should restrict by interface (`in on wg0`) AND/OR by source
+  IP if multiple devices share the VPN.
+- Confirm with `lsof -iTCP:8765 -sTCP:LISTEN` that the daemon binds the
+  expected address only.
+- The daemon prints a `⚠️ WARNING` to stderr when bound to a non-loopback
+  address. Don't ignore it.
+
+For Tailscale: same shape, replace `wg0` with `tailscale0` and use the
+machine's Tailscale IP (100.x.y.z). Tailscale ACLs replace UFW rules.
+
 ## SSH tunnel from the phone
 
 Recommended SSH clients:
