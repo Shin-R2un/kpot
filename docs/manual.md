@@ -24,6 +24,7 @@
    - [REPL コマンド詳細](#44-repl-コマンド詳細)
    - [keychain サブコマンド](#45-keychain-サブコマンド)
    - [config サブコマンド](#46-config-サブコマンド-v08)
+   - [serve サブコマンド](#47-serve-サブコマンド-v09)
 5. [ノート名のルール](#5-ノート名のルール)
 6. [テンプレートとプレースホルダー](#6-テンプレートとプレースホルダー)
 7. [設定ファイル](#7-設定ファイル)
@@ -571,6 +572,43 @@ vault_dir = "/home/shin/.kpot"
 | Windows | `%AppData%\kpot\config.toml` |
 
 `config init` で作られる親ディレクトリは `0o700`、ファイルは `0o600` で保存されます。
+
+---
+
+### 4.7 serve サブコマンド (v0.9+)
+
+スマホからの read-only WebUI。SSH トンネル + VPN 経由でアクセスする前提。
+
+```
+kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
+```
+
+```bash
+# サーバー側 (FW0 等)
+kpot serve 1pswd --idle 30
+
+# スマホ側 (Termius / Blink Shell / JuiceSSH)
+ssh -L 8765:127.0.0.1:8765 user@fw0
+# → 別アプリ (mobile Safari / Chrome) で http://localhost:8765/
+```
+
+機能:
+- 検索 (note 名 + 本文の case-insensitive substring)
+- field 単位 / note 全体のクリップボードコピー (iOS Safari の同期ジェスチャ要件に対応)
+- 秘密 field の表示/非表示トグル + 5 秒自動再隠蔽
+- `url:` field をブラウザで開く
+- session idle ロック (既定 30 分) → web フォームで再 passphrase
+- OS keychain にキャッシュがあれば daemon 起動時に silent unlock (`--no-cache` で無効化可能)
+
+セキュリティ:
+- `127.0.0.1` のみ bind (`--bind 0.0.0.0` フラグは意図的に無し)
+- 完全 read-only (ノート編集は引き続き REPL/CLI)
+- session cookie は HttpOnly + SameSite=Strict
+- login rate limit (3 fail / 60s → 30s lockout)
+- DEK は logout / idle / SIGINT で zero 化
+
+詳細は [`docs/serve.md`](serve.md) を参照 (SSH トンネルのレシピ、iOS のクリップボード制限、
+API リファレンス、auto-fill が技術的に不可能な理由 等)。
 
 ---
 

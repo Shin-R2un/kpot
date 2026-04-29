@@ -485,6 +485,40 @@ Single-shot subcommands (`kpot <file> ls` etc.) don't enter the REPL
 and are unaffected. Adjust the period via `idle_lock_minutes` in
 `config.toml`.
 
+## Mobile WebUI (v0.9+)
+
+`kpot serve` exposes a read-only web interface bound to `127.0.0.1`,
+designed for phone access via SSH tunnel + VPN.
+
+```bash
+# On the host (e.g. your home server):
+kpot serve 1pswd --idle 30
+
+# From your phone (Termius / Blink / JuiceSSH / etc.):
+ssh -L 8765:127.0.0.1:8765 user@your-host
+# Then open http://localhost:8765/ in mobile Safari / Chrome.
+```
+
+Features:
+
+- Search vault by name and body
+- Tap-to-copy passwords (synchronous gesture handler — works on iOS Safari)
+- Show/hide toggle for secret fields, auto-revert after 5s
+- Open `url:` field in browser
+- Per-session idle lock (default 30 min) → re-auth via web passphrase
+- OS keychain bootstrap: silent unlock at daemon start when DEK is cached
+
+Security:
+
+- Listens on `127.0.0.1` only; no `--bind` flag (SSH tunnel is the auth boundary)
+- Read-only — no edit endpoints, REPL stays the edit surface
+- Session cookies are HttpOnly + SameSite=Strict
+- Login rate-limited (3 fails / 60s → 30s lockout)
+- DEK zeroed on logout / idle / SIGINT
+
+See [`docs/serve.md`](docs/serve.md) for SSH tunnel recipes, clipboard
+caveats (especially iOS), API reference, and threat-model addendum.
+
 ## Out of scope (future PRs)
 - v0.5: transport-agnostic vault primitives — `kpot merge a.kpot b.kpot`,
   `<file>.lock`, optional payload metadata for merge automation. Bytes
