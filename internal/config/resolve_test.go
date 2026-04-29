@@ -268,6 +268,40 @@ func TestEnsureVaultDirCreatesParent(t *testing.T) {
 	}
 }
 
+// TestStarterTemplateParses guards the contract that `kpot config
+// init` writes a file kpot itself can load without error. If a key
+// is renamed or a value type changes, this catches the drift before
+// users do.
+func TestStarterTemplateParses(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	cfgPath := filepath.Join(dir, "starter.toml")
+	if err := os.WriteFile(cfgPath, []byte(StarterTemplate), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatalf("starter template fails to load: %v", err)
+	}
+	// Sanity-check a few values that the template hard-codes so a
+	// silent regression in the comment-vs-value layout would fail
+	// loudly.
+	if cfg.IdleLockMinutes != 10 {
+		t.Errorf("starter idle_lock_minutes = %d, want 10", cfg.IdleLockMinutes)
+	}
+	if cfg.Keychain != KeychainAuto {
+		t.Errorf("starter keychain = %q, want %q", cfg.Keychain, KeychainAuto)
+	}
+	expectedDir := filepath.Join(dir, ".kpot")
+	if cfg.VaultDir != expectedDir {
+		t.Errorf("starter vault_dir = %q, want %q (HOME-relative ~/.kpot)", cfg.VaultDir, expectedDir)
+	}
+	if cfg.DefaultVault != "" {
+		t.Errorf("starter default_vault should be commented out (empty), got %q", cfg.DefaultVault)
+	}
+}
+
 func TestEnsureVaultDirTightensExistingDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission semantics don't apply on Windows")
