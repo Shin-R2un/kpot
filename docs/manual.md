@@ -1,8 +1,14 @@
 # kpot ユーザーマニュアル
 
-> **バージョン**: 0.5.0  
-> **最終更新**: 2026-04-27  
+> **バージョン**: 0.8.0  
+> **最終更新**: 2026-04-29  
 > **リポジトリ**: https://github.com/Shin-R2un/kpot
+>
+> v0.5.0 → v0.8.0 の追加点:
+> - **v0.6**: REPL コンテキスト UX (`cd` / `show` / `fields` / `cp` / `set` / `unset`)
+> - **v0.6.1**: ノート名で Unicode 対応 (日本語 / キリル / ギリシャ等)
+> - **v0.7**: `vault_dir` + `default_vault` でベアネーム解決と既定 vault
+> - **v0.8**: `kpot config init/show/path` サブコマンド
 
 ---
 
@@ -17,6 +23,7 @@
    - [シングルショットモード](#43-シングルショットモード)
    - [REPL コマンド詳細](#44-repl-コマンド詳細)
    - [keychain サブコマンド](#45-keychain-サブコマンド)
+   - [config サブコマンド](#46-config-サブコマンド-v08)
 5. [ノート名のルール](#5-ノート名のルール)
 6. [テンプレートとプレースホルダー](#6-テンプレートとプレースホルダー)
 7. [設定ファイル](#7-設定ファイル)
@@ -89,18 +96,47 @@ make install     # $(go env GOPATH)/bin/kpot にインストール
 
 ## 3. クイックスタート
 
+### 3.1 v0.7+ 推奨フロー（ベアネーム + 既定 vault）
+
 ```bash
-# 1. 新しい保管庫を作成 (リカバリーシードが表示される)
+# 0. (初回のみ) 設定ファイルの雛形を生成
+kpot config init
+$EDITOR $(kpot config path)
+# vault_dir と default_vault を設定。例:
+#   vault_dir = "~/.kpot"
+#   default_vault = "personal"
+
+# 1. 保管庫を作成 (~/.kpot/personal.kpot に生成、ディレクトリも自動作成)
+kpot init personal
+
+# 2. 既定 vault を REPL で開く (パスや拡張子は不要)
+kpot
+
+# 3. REPL 内で v0.6 のコンテキスト UX を活用
+kpot:personal> note ai/openai           # $EDITOR でノートを作成・編集
+kpot:personal> ls                       # ノート一覧
+kpot:personal> cd ai/openai             # ノートコンテキストへ入る
+kpot:personal/ai/openai> show           # 全文表示
+kpot:personal/ai/openai> show url       # url フィールドだけ表示
+kpot:personal/ai/openai> cp apikey      # apikey をクリップボード (30秒自動消去)
+kpot:personal/ai/openai> set apikey     # 秘密値は TTY 非表示入力
+kpot:personal/ai/openai> fields         # フィールド一覧
+kpot:personal/ai/openai> cd /           # ルートに戻る
+kpot:personal> exit
+```
+
+### 3.2 従来フロー（パス指定、引き続き完全サポート）
+
+```bash
+# 1. 新しい保管庫を作成 (リカバリーシードが一度だけ表示される)
 kpot init personal.kpot
 
 # 2. 保管庫を開いて REPL に入る
 kpot personal.kpot
 
 # 3. REPL 内で操作
-kpot:personal> note ai/openai      # $EDITOR でノートを作成・編集
-kpot:personal> ls                  # ノート一覧
-kpot:personal> read ai/openai      # ノートを表示
-kpot:personal> copy ai/openai      # クリップボードにコピー (30秒で自動消去)
+kpot:personal> read ai/openai      # ノートを表示 (show のエイリアス)
+kpot:personal> copy ai/openai      # クリップボードにコピー
 kpot:personal> find openai         # 検索
 kpot:personal> rm ai/openai        # 削除 (確認あり)
 kpot:personal> exit
@@ -144,10 +180,12 @@ kpot init personal.kpot --recovery key
 ### 4.2 REPL モード
 
 ```
-kpot <file> [--recover] [--no-cache] [--forget]
+kpot                                  # 既定 vault を開く (要 default_vault 設定)
+kpot <name|file> [--recover] [--no-cache] [--forget]
 ```
 
-インタラクティブなシェルに入ります。
+インタラクティブなシェルに入ります。引数がベアネーム (`personal`) の場合は
+`<vault_dir>/personal.kpot` に解決されます (詳細は §7)。
 
 | オプション | 説明 |
 |-----------|------|
@@ -156,9 +194,11 @@ kpot <file> [--recover] [--no-cache] [--forget]
 | `--forget` | キャッシュされたキーを削除してから開く |
 
 ```bash
-kpot personal.kpot            # 通常起動
-kpot personal.kpot --recover  # リカバリーキーで起動
-kpot personal.kpot --no-cache # キャッシュ無効
+kpot                          # default_vault 起動 (v0.7+)
+kpot personal                 # ~/.kpot/personal.kpot 起動 (v0.7+)
+kpot personal.kpot            # 従来通り
+kpot ./local.kpot --recover   # 相対パスもサポート
+kpot personal --no-cache      # キャッシュ無効
 ```
 
 ---
@@ -166,17 +206,23 @@ kpot personal.kpot --no-cache # キャッシュ無効
 ### 4.3 シングルショットモード
 
 ```
-kpot <file> <command> [args...]
+kpot <name|file> <command> [args...]
 ```
 
 REPL に入らず、コマンドを 1 回だけ実行します。スクリプトや CI 向けです。
 
 ```bash
-kpot personal.kpot ls
-kpot personal.kpot read ai/openai
-kpot personal.kpot rm -y old/key
-kpot personal.kpot export -o backup.json --force
+kpot personal ls                          # ベアネーム (v0.7+)
+kpot personal read ai/openai
+kpot personal show ai/openai              # show は read のエイリアス (v0.6+)
+kpot personal cp ai/openai                # cp は copy の v0.6+ 拡張
+kpot personal rm -y old/key
+kpot personal export -o backup.json --force
+kpot ~/secrets/work.kpot ls               # 絶対 / 相対パスも当然動作
 ```
+
+> v0.6 で導入された `cd` / `pwd` / `fields` / `set` / `unset` は **REPL 専用**です。
+> シングルショットでは現在のノートコンテキストを保持できないため。
 
 ---
 
@@ -204,23 +250,145 @@ kpot:personal> note ai/openai
 
 ---
 
-#### `read <name>`
-ノートの本文を表示します。
+#### `read <name>` / `show [<arg>]` (v0.6+)
+
+`show` はコンテキスト UX を持つ表示コマンド。`read` は v0.5 までの形式で
+1 引数必須の **`show` のエイリアス**として維持されています。
 
 ```
-kpot:personal> read ai/openai
+kpot:personal> read ai/openai      # 1 引数必須 (従来通り)
 OPENAI_API_KEY=sk-...
+
+kpot:personal> show ai/openai      # 引数があればそのノートを表示
+kpot:personal> show                # 現在のノートコンテキストを表示
+                                   # (cd 後でないとエラー)
+kpot:personal> show url            # 現在のノートの url フィールドだけ
+```
+
+`show <arg>` の解決順: ① `<arg>` がノート名と完全一致 → そのノート全文 ② 現在
+ノートコンテキストが設定されていれば、`<arg>` をフィールド名として扱い値を表示。
+
+---
+
+#### `copy <name>` / `cp [<arg>]` (v0.6+)
+ノート本文または特定フィールドをクリップボードにコピーします。  
+デフォルト 30 秒後に自動消去されます (設定変更可)。
+
+`copy` は v0.5 互換 (1 引数必須・ノート名のみ)。`cp` は `show` と同じ
+コンテキスト解決を持つ拡張版。
+
+```
+kpot:personal> copy ai/openai             # 従来形式
+copied ai/openai via xclip (auto-clears in 30s)
+
+kpot:personal/ai/openai> cp apikey        # 現在ノートの field をコピー
+copied field "apikey" from ai/openai via xclip (auto-clears in 30s)
+
+kpot:personal/ai/openai> cp               # 現在ノートを丸ごとコピー
 ```
 
 ---
 
-#### `copy <name>`
-ノート本文をクリップボードにコピーします。  
-デフォルト 30 秒後に自動消去されます (設定変更可)。
+#### `cd <note>` / `cd ..` / `cd /` (v0.6+)
+ノートコンテキストを設定 / 解除します。
+
+| 入力 | 動作 |
+|---|---|
+| `cd ai/openai` (完全一致) | コンテキストを `ai/openai` に設定。プロンプトは `kpot:personal/ai/openai>` |
+| `cd ai` (グループ) | `ai` というノートが無く `ai/...` が複数ある場合、候補一覧を表示。コンテキストは変更しない |
+| `cd ..` / `cd /` | コンテキストをルートに戻す (どちらも同じ。MVP では階層を 1 つ上がるのではなく即ルート復帰) |
 
 ```
-kpot:personal> copy ai/openai
-copied ai/openai via xclip (auto-clears in 30s)
+kpot:personal> cd ai/openai
+kpot:personal/ai/openai> pwd
+/ai/openai
+
+kpot:personal> cd ai
+"ai" is a group, not a note.
+
+Matching notes:
+  ai/openai
+  ai/claude
+
+Use:
+  cd ai/openai
+```
+
+---
+
+#### `pwd` (v0.6+)
+現在のノートコンテキストを表示します。
+
+```
+kpot:personal> pwd
+/
+
+kpot:personal/ai/openai> pwd
+/ai/openai
+```
+
+---
+
+#### `fields` (v0.6+)
+現在のノートから抽出された `key: value` 形式のフィールド一覧を表示します。
+
+```
+kpot:personal> cd ai/openai
+kpot:personal/ai/openai> fields
+id
+url
+apikey
+pass
+token
+```
+
+ノートコンテキストが設定されていない場合は `No current note. Use 'cd <note>' first.` を表示
+します (エラーではなく案内)。
+
+---
+
+#### `set <field> [<value>]` (v0.6+)
+現在のノートのフィールドを更新します。
+
+| 入力 | 動作 |
+|---|---|
+| `set url https://api.example.com` | 値を直接指定して更新 |
+| `set apikey` | TTY 非エコー入力でプロンプト (秘密値) |
+| `set pass mypassword` | **拒否** — 秘密値を引数渡しすると liner の REPL 履歴に残るため |
+
+秘密値として扱われるフィールド名 (大文字小文字無視):
+
+```
+pass / password / pwd / pin
+apikey / api_key / api-key / key / token / secret
+client_secret / client-secret
+otp / totp / otp_seed / otp-seed
+private_key / private-key / ssh_key / ssh-key
+```
+
+これらに該当するフィールドを引数付きで `set` しようとすると拒否されます。
+代わりに引数なしで呼び出すと TTY から非エコーで値を受け取ります。
+
+該当フィールドが存在しない場合は新規追加されます (フィールドブロックの末尾、
+あるいはタイトル直後)。
+
+```
+kpot:personal/ai/openai> set url https://api.openai.com
+updated field "url"
+
+kpot:personal/ai/openai> set apikey
+New value for apikey: ****
+updated field "apikey"
+```
+
+---
+
+#### `unset <field>` (v0.6+)
+現在のノートからフィールドを削除します。存在しないフィールドはエラー。
+
+```
+kpot:personal/ai/openai> unset old_field
+removed field "old_field"
 ```
 
 ---
@@ -361,28 +529,84 @@ hint: install libsecret-tools and ensure DBUS_SESSION_BUS_ADDRESS is set
 
 ---
 
+### 4.6 config サブコマンド (v0.8+)
+
+設定ファイルの管理コマンド。手書きで作る代わりに使えます。
+
+```
+kpot config init [--force]   # 雛形を OS 既定パスに書き出す
+kpot config show             # 実効設定を TOML 形式で表示
+kpot config path             # 設定ファイルのパスを表示
+```
+
+```bash
+$ kpot config path
+/home/shin/.config/kpot/config.toml
+
+$ kpot config init
+✓ wrote /home/shin/.config/kpot/config.toml
+  Edit it with: $EDITOR /home/shin/.config/kpot/config.toml
+
+$ kpot config show
+# config file: /home/shin/.config/kpot/config.toml
+# values below include defaults applied for absent keys
+
+# editor unset — falls back to $EDITOR / $VISUAL / built-ins
+clipboard_clear_seconds = 30
+keychain = "auto"
+idle_lock_minutes = 10
+vault_dir = "/home/shin/.kpot"
+# default_vault unset — bare 'kpot' prints usage
+```
+
+`config init` は既存ファイルを上書きしません (`--force` で明示的に上書き)。
+雛形はコメント付きで全キーを網羅しているので、これだけで設定リファレンスとして機能します。
+
+設定ファイルの保存先は OS 別:
+
+| OS | パス |
+|---|---|
+| Linux | `$XDG_CONFIG_HOME/kpot/config.toml` (通常 `~/.config/kpot/config.toml`) |
+| macOS | `~/Library/Application Support/kpot/config.toml` |
+| Windows | `%AppData%\kpot\config.toml` |
+
+`config init` で作られる親ディレクトリは `0o700`、ファイルは `0o600` で保存されます。
+
+---
+
 ## 5. ノート名のルール
+
+v0.6.1 で **Unicode 対応** されました。日本語・キリル・ギリシャ等の文字をノート名に使えます。
 
 | ルール | 詳細 |
 |-------|------|
-| 使用可能文字 | `a-z 0-9 . - _ /` (ASCII のみ) |
-| 大文字 | 自動的に小文字に変換 |
-| 長さ | 1〜128 文字 |
-| `/` | ディレクトリ区切りとして使用可能 |
+| 使用可能文字 | Unicode 文字 (`unicode.IsLetter`) + 数字 (`unicode.IsDigit`) + `. - _ /` |
+| 大文字 | ASCII 部分のみ自動的に小文字に変換 (`OpenAI` → `openai`)。日本語等は不変 |
+| 長さ | 1〜128 **runes** (バイトではなく文字数) |
+| `/` | 階層区切りとして使用可能 |
 | 先頭・末尾の `/` | 不可 |
 | 連続した `//` | 不可 |
+| 拒否される文字 | 絵文字、記号 (`★`, `🔑`)、空白、`$`/`*`/`?` 等のシェル意味文字、全角スラッシュ `／` |
 
 ```bash
 # 有効な名前
 ai/openai
 server/prod/db
 my-secret_key.v2
+password/のりお            # ← v0.6.1+
+работа/почта              # ← v0.6.1+ (キリル)
+alpha/βeta                # ← v0.6.1+ (ラテン+ギリシャ)
+日本語
 
-# 無効な名前 (エラーになる)
+# 無効な名前 (エラー)
 /leading-slash
 trailing/slash/
 double//slash
-UPPERCASE         # → uppercase に自動変換
+has space
+login/🔑                  # 絵文字は拒否
+a★b                      # 記号は拒否
+a／b                      # 全角スラッシュは `/` ではないので拒否
+UPPERCASE                 # → uppercase に自動変換 (これは有効)
 ```
 
 ---
@@ -427,10 +651,20 @@ kpot:personal> template
 
 ## 7. 設定ファイル
 
-`~/.config/kpot/config.toml` に設定を記述できます。
+`~/.config/kpot/config.toml` (Linux) または OS 別の設定ディレクトリに配置します。
+v0.8 以降は `kpot config init` で雛形を自動生成できます (§4.6 参照)。
 
 ```toml
-# 使用するエディタ ($EDITOR より優先される)
+# v0.7+: ベアネーム vault 解決のベースディレクトリ。`~/` は読み込み時に展開。
+# 空 / 不在のときは ~/.kpot がデフォルト。
+vault_dir = "~/.kpot"
+
+# v0.7+: 引数なし `kpot` で開く既定 vault。
+# CLI 引数と同じ解決ルール (バーネネーム → vault_dir/<name>.kpot)。
+# 空 / 不在のときは引数なし `kpot` は help を表示。
+default_vault = "personal"
+
+# 使用するエディタ ($EDITOR / $VISUAL より優先される)
 editor = "vim"
 
 # クリップボード自動消去までの秒数 (デフォルト: 30)
@@ -439,9 +673,33 @@ clipboard_clear_seconds = 60
 # OS キーチェーン動作 ("auto" | "always" | "never", デフォルト: "auto")
 keychain = "auto"
 
-# アイドルロックまでの分数 (デフォルト: 10)
+# REPL アイドルロックまでの分数 (デフォルト: 10、シングルショットには無効)
 idle_lock_minutes = 15
 ```
+
+### vault_dir の解決ルール (v0.7+)
+
+`kpot <name>` のベアネーム引数 / `default_vault` の値は以下の順で解決されます:
+
+1. 入力が `~/` で始まる → ホームディレクトリに展開
+2. 入力に `/` または `\` が含まれる → そのままパスとして扱う (パススルー)
+3. 入力が `.kpot` 拡張子で終わり、かつ CWD にそのファイルが存在 → CWD のファイルを採用 (後方互換)
+4. それ以外 (ベアネーム) → `<vault_dir>/<name>.kpot` に解決
+
+**セキュリティ注: バーネネーム (`personal` 等) は CWD を見ません**。これは「悪意ある repo が
+`personal.kpot` を root に置いて `cd repo && kpot personal` で実 vault を shadow する」
+phishing を防ぐためです。`.kpot` サフィックスを明示した場合のみ CWD のファイルを優先します。
+
+### vault_dir のパーミッション
+
+`kpot init` 実行時、`vault_dir` (デフォルト `~/.kpot`) は **`0o700`** に締められます。
+他ツールが緩いモードで作っていても自動的にクランプされるので、同マシンの別ユーザーから
+ファイル名一覧を覗かれることはありません (Windows は NTFS ACL に委譲、no-op)。
+
+各 vault ファイル (`*.kpot`) も AEAD 暗号化されているため、漏れてもパスフレーズ無しでは
+読めません。`vault_dir` ごと漏れた場合に露出する **メタデータ**は: ① 持っている vault 名
+の一覧、② 各 vault のおおよその件数 (ファイルサイズで推測可能)、③ 更新タイムスタンプ。
+これが脅威モデルに該当する場合は `vault_dir` を tmpfs や暗号化外付けに移してください。
 
 ---
 
