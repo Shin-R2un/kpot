@@ -283,7 +283,40 @@ keychain = "auto"
 # REPL auto-closes after N minutes of no command activity (default 10).
 # Single-shot subcommands are unaffected.
 idle_lock_minutes = 10
+
+# v0.7+: where `kpot <bare-name>` looks for vaults. Default ~/.kpot.
+# `~/` is expanded at load time. `kpot init personal` creates the
+# directory if missing (chmod 0700).
+vault_dir = "~/.kpot"
+
+# v0.7+: vault opened by bare `kpot` with no positional argument.
+# Goes through the same name resolution as a CLI argument: bare
+# names get `.kpot` appended and resolve under vault_dir.
+default_vault = "personal"
 ```
+
+### Vault name resolution (v0.7+)
+
+`kpot <name>` no longer requires a path. With the defaults above:
+
+```bash
+kpot                    # → opens ~/.kpot/personal.kpot (default_vault)
+kpot personal           # → ~/.kpot/personal.kpot
+kpot work read api/foo  # → ~/.kpot/work.kpot, single-shot read
+kpot init shared        # → creates ~/.kpot/shared.kpot (mkdir -p first)
+
+# Path-like inputs still pass through unchanged:
+kpot ./local.kpot       # CWD file
+kpot /srv/team.kpot     # absolute path
+kpot ../sibling.kpot    # relative with separator
+```
+
+Resolution order for a bare name like `personal`:
+
+1. If the input contains `/` or `\\`, use as-is.
+2. Otherwise append `.kpot` if missing.
+3. If `<candidate>` exists in the current working directory, use it (back-compat).
+4. Else fall back to `<vault_dir>/<candidate>`.
 
 Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
 `vim` / `vi` (or `notepad` on Windows).
