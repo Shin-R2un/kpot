@@ -22,16 +22,22 @@ import (
 const usage = `kpot - encrypted CLI note vault
 
 Usage:
-  kpot init <file> [--recovery seed|key] [--recovery-words 12|24]
+  kpot                         Open the default_vault (config) and enter the REPL.
+                               Prints this help when no default_vault is set.
+  kpot init <name|file> [--recovery seed|key] [--recovery-words 12|24]
                                Create a new encrypted vault. Always issues a
                                recovery key (default: BIP-39 12-word seed).
-  kpot <file>                  Open a vault and enter the REPL
-  kpot <file> --recover        Open a vault using its recovery key
-  kpot <file> --no-cache       Open without consulting the OS keychain cache
-  kpot <file> --forget         Remove the cached key and exit (or run a follow-up command without using the cache)
-  kpot <file> <command> ...    Run a single command without entering the REPL
+                               Bare names resolve under <vault_dir>/<name>.kpot.
+  kpot <name|file>             Open a vault and enter the REPL. Bare names
+                               resolve under <vault_dir> (default ~/.kpot)
+                               with .kpot appended automatically.
+  kpot <name|file> --recover   Open a vault using its recovery key
+  kpot <name|file> --no-cache  Open without consulting the OS keychain cache
+  kpot <name|file> --forget    Remove the cached key and exit (or run a follow-up command without using the cache)
+  kpot <name|file> <command> ...
+                               Run a single command without entering the REPL
   kpot keychain test           Diagnose the OS keychain backend
-  kpot config init             Write a starter config.toml at the OS-default path
+  kpot config init [--force]   Write a starter config.toml at the OS-default path
   kpot config show             Print the effective configuration (file + defaults)
   kpot config path             Print the OS-default config-file path
   kpot help                    Show this help
@@ -39,9 +45,11 @@ Usage:
 
 Single-shot commands (mirror the REPL):
   ls
-  read <name>
+  show [<arg>]                 print body of <arg> (note name) — alias for read
+  read <name>                  print body to stdout
   note <name>                  (opens $EDITOR)
-  copy <name>
+  cp [<arg>]                   clipboard counterpart of show — alias for copy
+  copy <name>                  copy a note's body to the clipboard
   find <query...>
   rm [-y] <name>
   template [show|reset]
@@ -52,6 +60,13 @@ Single-shot commands (mirror the REPL):
   bundle <name>... -o <path> [--force]
                                encrypt selected notes into a portable .kpb file
   import-bundle <path> [-y]    decrypt a .kpb (asks for source passphrase) and merge
+
+REPL-only commands (require an interactive session):
+  cd <note> | cd .. | cd /     enter / leave a note context
+  pwd                          print current note context
+  fields                       list fields of the current note
+  set <field> [<value>]        update field; secret fields force a TTY prompt
+  unset <field>                remove a field from the current note
 
 Environment:
   KPOT_PASSPHRASE              if set, used in place of the TTY prompt
@@ -74,19 +89,28 @@ Recovery model:
   working as-is, but adding recovery to them is not supported.
 
 Examples:
-  kpot init personal.kpot
-  kpot init personal.kpot --recovery key
-  kpot personal.kpot
-  kpot personal.kpot --recover
-  kpot personal.kpot ls
-  kpot personal.kpot read ai/openai
-  KPOT_PASSPHRASE=secret kpot personal.kpot copy ai/openai
+  # Bare-name workflow (v0.7+, default vault_dir = ~/.kpot):
+  kpot init personal              # → ~/.kpot/personal.kpot (mkdir + chmod 0700)
+  kpot                            # default_vault REPL (set in config.toml)
+  kpot personal                   # → ~/.kpot/personal.kpot REPL
+  kpot personal read ai/openai    # → single-shot read
+
+  # Path workflow (back-compat, still fully supported):
+  kpot init ~/secrets/work.kpot
+  kpot ~/secrets/work.kpot
+  kpot ~/secrets/work.kpot --recover
+  KPOT_PASSPHRASE=secret kpot ~/secrets/work.kpot copy ai/openai
+
+  # Config bootstrapping:
+  kpot config init                 # write a commented starter config.toml
+  $EDITOR $(kpot config path)      # edit it
+  kpot config show                 # verify the effective values
 `
 
 // version is the released build version. Overridden at link time by
 // goreleaser via -ldflags "-X main.version=...". Unreleased builds keep
 // the in-tree placeholder so `kpot version` still prints something useful.
-var version = "0.7.0-dev"
+var version = "0.8.1-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
