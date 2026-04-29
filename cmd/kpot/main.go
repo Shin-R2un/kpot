@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -30,6 +31,9 @@ Usage:
   kpot <file> --forget         Remove the cached key and exit (or run a follow-up command without using the cache)
   kpot <file> <command> ...    Run a single command without entering the REPL
   kpot keychain test           Diagnose the OS keychain backend
+  kpot config init             Write a starter config.toml at the OS-default path
+  kpot config show             Print the effective configuration (file + defaults)
+  kpot config path             Print the OS-default config-file path
   kpot help                    Show this help
   kpot version                 Show the version
 
@@ -124,6 +128,8 @@ func run(args []string) error {
 		return cmdInit(args[1:], cfg)
 	case "keychain":
 		return cmdKeychain(args[1:], cfg)
+	case "config":
+		return cmdConfig(args[1:], cfg)
 	default:
 		// Resolve a bare name like `personal` to <vault_dir>/personal.kpot
 		// (or to a CWD file if one exists by that name). Path-like
@@ -190,6 +196,139 @@ func cmdKeychain(args []string, cfg config.Config) error {
 	default:
 		return errArgs(fmt.Sprintf("unknown keychain subcommand: %s", args[0]))
 	}
+}
+
+// cmdConfig dispatches `kpot config <sub>`:
+//
+//	init [--force]   write a starter config.toml at the OS-default
+//	                 location. Refuses if the file exists unless
+//	                 --force is passed (back-compat with operations
+//	                 the user has memorized in the existing file).
+//	show             print the effective configuration as TOML on
+//	                 stdout. Useful for "what does kpot think the
+//	                 settings are right now" debugging — shows
+//	                 file-loaded values plus defaults that fill in
+//	                 absent keys.
+//	path             print the OS-default config path. Stays one
+//	                 line so it works in shell substitution like
+//	                 `$EDITOR $(kpot config path)`.
+func cmdConfig(args []string, cfg config.Config) error {
+	if len(args) == 0 {
+		return errArgs("usage: kpot config (init [--force] | show | path)")
+	}
+	switch args[0] {
+	case "init":
+		return cmdConfigInit(args[1:])
+	case "show":
+		return cmdConfigShow(cfg)
+	case "path":
+		return cmdConfigPath()
+	default:
+		return errArgs(fmt.Sprintf("unknown config subcommand: %s", args[0]))
+	}
+}
+
+func cmdConfigPath() error {
+	p, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	fmt.Println(p)
+	return nil
+}
+
+func cmdConfigInit(args []string) error {
+	force := false
+	for _, a := range args {
+		switch a {
+		case "-f", "--force":
+			force = true
+		default:
+			return errArgs(fmt.Sprintf("unknown flag: %s", a))
+		}
+	}
+
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil && !force {
+		return fmt.Errorf("%s already exists. Use --force to overwrite", path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	// Create parent dir owner-only — the file may eventually hold
+	// per-vault paths or aliases that you'd rather not leak to other
+	// local users. Same posture as the vault dir.
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.Chmod(parent, 0o700); err != nil && runtime.GOOS != "windows" {
+		return fmt.Errorf("set config dir permissions: %w", err)
+	}
+
+	if err := os.WriteFile(path, []byte(config.StarterTemplate), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "✓ wrote %s\n", path)
+	fmt.Fprintf(os.Stderr, "  Edit it with: $EDITOR %s\n", path)
+	return nil
+}
+
+// cmdConfigShow prints the *effective* configuration — the values
+// that would influence runtime behavior right now, after defaults
+// have been applied. Format is TOML so the output is round-trippable
+// (paste back into config.toml and you'd get the same effective
+// config). Empty Editor is rendered as a comment so users can see
+// "this falls back to $EDITOR" without it looking like a bug.
+func cmdConfigShow(cfg config.Config) error {
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "# config file: %s (does not exist — using all defaults)\n", path)
+	} else {
+		fmt.Fprintf(os.Stderr, "# config file: %s\n", path)
+	}
+	fmt.Fprintln(os.Stderr, "# values below include defaults applied for absent keys")
+	fmt.Fprintln(os.Stderr)
+
+	idle := cfg.IdleLockMinutes
+	if idle == 0 {
+		idle = config.DefaultIdleLockMinutes
+	}
+	clip := cfg.ClipboardClearSeconds
+	if clip == 0 {
+		clip = 30 // matches clipboard.NewManager default
+	}
+	keychain := cfg.KeychainMode()
+	vaultDir := cfg.VaultDir
+	vaultDirNote := ""
+	if vaultDir == "" {
+		if d, err := config.DefaultVaultDir(); err == nil {
+			vaultDir = d
+			vaultDirNote = "  # default (vault_dir unset)"
+		}
+	}
+
+	if cfg.Editor == "" {
+		fmt.Println(`# editor unset — falls back to $EDITOR / $VISUAL / built-ins`)
+	} else {
+		fmt.Printf("editor = %q\n", cfg.Editor)
+	}
+	fmt.Printf("clipboard_clear_seconds = %d\n", clip)
+	fmt.Printf("keychain = %q\n", keychain)
+	fmt.Printf("idle_lock_minutes = %d\n", idle)
+	fmt.Printf("vault_dir = %q%s\n", vaultDir, vaultDirNote)
+	if cfg.DefaultVault == "" {
+		fmt.Println(`# default_vault unset — bare 'kpot' prints usage`)
+	} else {
+		fmt.Printf("default_vault = %q\n", cfg.DefaultVault)
+	}
+	return nil
 }
 
 func cmdKeychainTest(cfg config.Config) error {

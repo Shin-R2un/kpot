@@ -321,6 +321,19 @@ Resolution order for a bare name like `personal`:
 Editor lookup order: config `editor` → `$EDITOR` → `$VISUAL` → `nano` /
 `vim` / `vi` (or `notepad` on Windows).
 
+### Managing the config file (v0.7+)
+
+```bash
+kpot config init        # write a starter config.toml at the default path
+kpot config show        # print effective config (file values + defaults)
+kpot config path        # print where kpot looks for the file
+$EDITOR $(kpot config path)
+```
+
+`config init` refuses to clobber an existing file. Pass `--force` to
+overwrite. The starter template is fully commented; uncomment lines
+to deviate from defaults.
+
 ## Recovery key (v0.3+)
 
 Every vault created with v0.3+ ships with a **recovery key** displayed
