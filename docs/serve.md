@@ -1,7 +1,9 @@
 # `kpot serve` — mobile WebUI (v0.9+)
 
-Read-only web interface for accessing a kpot vault from a smartphone via
-SSH tunnel. Designed for the workflow:
+Read-only web interface for accessing a kpot vault from a smartphone.
+The default access path is an SSH tunnel to a loopback-only daemon; an
+advanced direct-VPN mode can bind one specific VPN/Tailscale interface
+IP. Designed for the workflow:
 
 > 「外出先のスマホから、自宅サーバの kpot vault のパスワードをコピーして
 > ブラウザに貼りたい」
@@ -11,9 +13,11 @@ SSH tunnel. Designed for the workflow:
 `kpot serve` ships under the same threat model as the rest of kpot
 (`docs/security.md`), with two specific properties:
 
-- **Listens on `127.0.0.1` only.** There is no `--bind` flag. The plain-
-  HTTP boundary is the SSH tunnel, not TLS. Exposing the port on the
-  LAN would contradict the "compromised host out of scope" boundary.
+- **Binds `127.0.0.1` by default.** The plain-HTTP boundary is the SSH
+  tunnel, not TLS.
+- **`--bind` is advanced mode for one trusted interface IP.** Use it
+  only for a specific VPN/Tailscale address such as `10.0.0.1` or
+  `100.x.y.z`. Wildcard binds (`0.0.0.0`, `::`) are refused.
 - **Read-only.** No endpoint mutates the vault. Edits remain a REPL/CLI
   responsibility because the vault format has no file lock yet — REPL
   + `serve` writing concurrently would race.
@@ -36,7 +40,7 @@ session is active, the attacker can read every note. Mitigations:
       │ ssh -L 8765:127.0.0.1:8765 user@fw0
       ▼
 http://localhost:8765/                    kpot serve <vault>
-                                            └── 127.0.0.1:8765 only
+                                            └── 127.0.0.1:8765 by default
 ```
 
 ## Quick start
@@ -56,7 +60,8 @@ phone side. Defaults:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--port` | `8765` | TCP port on `127.0.0.1` |
+| `--bind` | `127.0.0.1` | Bind address. Use only a specific VPN/Tailscale interface IP for direct-VPN access; `0.0.0.0` / `::` are refused. |
+| `--port` | `8765` | TCP port on the selected bind address |
 | `--idle` | `30` | Per-session idle minutes (`0` = disable) |
 | `--no-cache` | off | Skip OS keychain even if a DEK is cached. Forces every visit through the web passphrase form. |
 
@@ -114,8 +119,9 @@ Pros: Safari-only daily UX (one tap WG ON, one tap bookmark).
 Cons: requires VPN setup + firewall hygiene. Misconfigured UFW = LAN exposure.
 
 Required hygiene:
-- Bind to the **VPN interface IP**, not `0.0.0.0`. The daemon literally
-  cannot accept connections from non-VPN paths if bound to `wg0`'s IP.
+- Bind to the **VPN interface IP**, not a wildcard. `kpot serve`
+  refuses `--bind 0.0.0.0` and `--bind ::`; binding `wg0`'s IP prevents
+  non-VPN paths from reaching the daemon at the socket layer.
 - UFW rule should restrict by interface (`in on wg0`) AND/OR by source
   IP if multiple devices share the VPN.
 - Confirm with `lsof -iTCP:8765 -sTCP:LISTEN` that the daemon binds the
@@ -225,7 +231,8 @@ extension" works on phones today.
 
 When deploying, double-check:
 
-- [ ] `lsof -iTCP:8765 -sTCP:LISTEN` shows `127.0.0.1:8765` (not `*:8765`).
+- [ ] SSH-tunnel mode: `lsof -iTCP:8765 -sTCP:LISTEN` shows `127.0.0.1:8765` (not `*:8765`).
+- [ ] Direct-VPN mode: `lsof -iTCP:8765 -sTCP:LISTEN` shows the exact VPN/Tailscale IP, not `*:8765`.
 - [ ] Phone visits succeed only when SSH tunnel is active. Without
   the tunnel, browser hits `localhost:8765` get connection refused.
 - [ ] `kpot config show` confirms `keychain` is `auto` (or `always`)
@@ -239,6 +246,7 @@ When deploying, double-check:
 
 - Auto-fill, multi-vault, RW from web — see the threat-model rationale
   in the corresponding `docs/security.md` and the v0.9 plan file.
-- `--bind 0.0.0.0` — refused on principle; the daemon is loopback-only.
-- TLS — unnecessary on loopback; the SSH tunnel is the transport
-  encryption.
+- `--bind 0.0.0.0` / `--bind ::` — refused on principle; bind loopback
+  or one specific trusted VPN/Tailscale interface IP.
+- TLS — unnecessary on loopback/VPN; the SSH tunnel or VPN is the
+  transport encryption.

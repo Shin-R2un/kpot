@@ -3,7 +3,7 @@
 > **Audience**: anyone deciding whether to trust kpot with secrets,
 > reviewers, and security researchers about to file a report.
 >
-> **Scope**: this document describes what kpot v0.5.x is designed to
+> **Scope**: this document describes what kpot v0.9.x is designed to
 > defend against, what it explicitly is **not**, and the rationale
 > for each crypto / OS choice. The vulnerability reporting flow is
 > in [SECURITY.md](../SECURITY.md).
@@ -83,6 +83,12 @@ passphrase.
 
 `read` writes to stdout (your choice — convenient but visible);
 prefer `copy` for "show but don't display."
+
+`kpot serve` is read-only and uses per-session idle locks. It binds
+`127.0.0.1` by default for SSH-tunnel access. `--bind` is allowed only
+for a specific trusted VPN/Tailscale interface IP; wildcard binds such
+as `0.0.0.0` and `::` are refused. The WebUI is plain HTTP, so the
+transport boundary must be loopback, SSH, or VPN.
 
 ### 4. Vault directory metadata exposure
 
@@ -217,7 +223,7 @@ What's planned (no fixed timeline, but on the roadmap):
 Defaults (`memory=64 MiB, iterations=3`) target ~0.5 s on a 2020-era
 laptop. The parameters are currently fixed at the values stated above;
 auto-calibration via a `--argon2-target` flag is planned but **not yet
-shipped**, so do not rely on it being available in v0.5.x.
+shipped**, so do not rely on it being available in v0.9.x.
 
 ### Why BIP-39 for the recovery seed?
 
@@ -281,4 +287,6 @@ coordinated disclosure on a 60–90 day timeline.
 
 ## Changelog of this document
 
+- **2026-04-29**: Updated scope to v0.9.x and documented `kpot serve`
+  bind-address rules.
 - **2026-04-28**: Initial threat model for v0.5.x.

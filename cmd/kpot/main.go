@@ -367,12 +367,11 @@ func cmdConfigShow(cfg config.Config) error {
 
 // cmdServe starts the read-only WebUI for a vault. Usage:
 //
-//	kpot serve <name|file> [--port 8765] [--idle 30] [--no-cache]
+//	kpot serve <name|file> [--bind ADDR] [--port 8765] [--idle 30] [--no-cache]
 //
-// The daemon binds 127.0.0.1 only — there's no `--bind` flag on
-// purpose. Phone access is meant to go through an SSH tunnel; binding
-// to 0.0.0.0 would expose plaintext HTTP to the LAN, contradicting
-// docs/security.md's threat model.
+// The daemon binds 127.0.0.1 by default. `--bind` exists for a
+// specific VPN/Tailscale interface IP only; wildcard binds are rejected
+// because the WebUI is plain HTTP and relies on a trusted transport.
 func cmdServe(args []string, cfg config.Config) error {
 	var (
 		path     string
