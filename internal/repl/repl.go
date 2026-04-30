@@ -1365,6 +1365,14 @@ func (s *Session) importVault(args []string) error {
 		if in.Template != "" {
 			s.Vault.Template = in.Template
 		}
+		// "replace ALL" must take Recent and Trash with it. Otherwise a
+		// trashed note from the *prior* vault — typically the secret
+		// that prompted the replace — silently lingers in the payload
+		// and pops back via `restore`. We adopt the import side's
+		// values (which are usually empty for a freshly-exported JSON,
+		// but we copy them through to be faithful to the source).
+		s.Vault.Recent = in.Recent
+		s.Vault.Trash = in.Trash
 		fmt.Fprintf(s.out, "replaced: %d notes\n", len(in.Notes))
 	case "merge":
 		added, conflicts := mergeNotes(s.Vault, in)

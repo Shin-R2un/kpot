@@ -2,11 +2,14 @@ package repl
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Shin-R2un/kpot/internal/fields"
+	"github.com/Shin-R2un/kpot/internal/store"
 )
 
 // TestFindNumberedThenCdResolvesByIndex covers the headline UX of v0.10:
@@ -277,6 +280,69 @@ func TestCpTwoArgFromSelection(t *testing.T) {
 	}
 	if got := clip.Snapshot(); string(got) != "sk-secret-value" {
 		t.Errorf("clipboard = %q, want %q", got, "sk-secret-value")
+	}
+}
+
+// TestImportReplaceClearsTrashAndRecent guards a privacy promise: when
+// the user runs `import --mode replace`, the user has explicitly said
+// "replace ALL existing notes". A leftover Trash entry would let
+// secrets from the prior vault re-emerge via `restore` even though
+// the user thought they had wiped the slate. Same for Recent — those
+// names point at notes that don't exist any more, leaking traces of
+// the prior vault's hierarchy.
+func TestImportReplaceClearsTrashAndRecent(t *testing.T) {
+	dir := t.TempDir()
+	s := scriptedSession(t, filepath.Join(dir, "v.kpot"))
+	defer s.Close()
+
+	// Pre-populate a vault that has live notes, recent history, and
+	// a trashed entry — the kind of state a user would have before
+	// asking to replace everything.
+	s.Vault.Put("old/secret", "shh")
+	s.Vault.TrackRecent("old/secret")
+	if _, err := s.Vault.TrashNote("old/secret", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.Vault.Put("kept/note", "alive")
+	if err := s.persist(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Vault.Trash) == 0 {
+		t.Fatal("setup: expected a trash entry")
+	}
+
+	// Build the import payload (a brand new vault with one note).
+	in := store.New()
+	in.Put("new/only", "fresh")
+	importJSON, err := in.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	importPath := filepath.Join(dir, "in.json")
+	if err := os.WriteFile(importPath, importJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run replace; -y to skip confirm.
+	if _, err := s.dispatch("import", []string{importPath, "--mode", "replace", "-y"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live notes: only the imported one.
+	if _, ok := s.Vault.Get("new/only"); !ok {
+		t.Errorf("imported note missing after replace")
+	}
+	if _, ok := s.Vault.Get("kept/note"); ok {
+		t.Errorf("old note %q still present after replace", "kept/note")
+	}
+
+	// Trash and Recent must be wiped — the import side carried no
+	// such fields, so we should adopt that empty state.
+	if len(s.Vault.Trash) != 0 {
+		t.Errorf("Trash leaked across replace: %v", s.Vault.Trash)
+	}
+	if len(s.Vault.Recent) != 0 {
+		t.Errorf("Recent leaked across replace: %v", s.Vault.Recent)
 	}
 }
 

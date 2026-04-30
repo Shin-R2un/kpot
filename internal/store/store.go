@@ -84,7 +84,20 @@ func FromJSON(b []byte) (*DecryptedVault, error) {
 	return v, nil
 }
 
+// ToJSON serialises the vault for re-encryption. It also stamps the
+// payload with the current StoreVersion so a v1 vault loaded by a
+// v0.10+ binary is persisted as v2 on first save (auto-upgrade).
+//
+// This matters for forward compat: without this bump, a v1 payload
+// saved by v0.10 would still claim version=1, which a v0.9 binary
+// would happily open — and v0.9 doesn't know about Recent/Trash, so
+// the next save under v0.9 would silently drop those fields and
+// orphan trash entries (the deleted notes leak out of restorability).
+//
+// Bumping at serialise time means the v0.9 → v0.10 → v0.9 round-trip
+// is rejected at the v0.9 step instead of silently destroying data.
 func (v *DecryptedVault) ToJSON() ([]byte, error) {
+	v.Version = StoreVersion
 	v.UpdatedAt = time.Now().UTC()
 	return json.Marshal(v)
 }
