@@ -118,7 +118,7 @@ Examples:
 // version is the released build version. Overridden at link time by
 // goreleaser via -ldflags "-X main.version=...". Unreleased builds keep
 // the in-tree placeholder so `kpot version` still prints something useful.
-var version = "0.8.1-dev"
+var version = "0.10.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

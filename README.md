@@ -100,6 +100,21 @@ kpot:personal/ai/openai> set apikey                       # secret prompt
 kpot:personal/ai/openai> unset old_field
 kpot:personal/ai/openai> cd ..      # leave context (cd / works too)
 
+# v0.10: numbered find + recent + reversible rm
+kpot:personal> find github
+1  accounts/github-main      (name)
+2  dev/github-pat            (body)  token: ghp_xxx
+kpot:personal> cd 1                 # into match #1, no need to retype the name
+kpot:personal/accounts/github-main> cp pass
+kpot:personal/accounts/github-main> recent
+1  accounts/github-main
+2  ai/openai
+kpot:personal> rm dev/github-pat    # moves to trash (reversible)
+moved to trash: dev/github-pat.deleted-20260501-153012
+kpot:personal> trash                # see what's in the bin
+kpot:personal> restore dev/github-pat.deleted-20260501-153012
+kpot:personal> purge --all          # type "PURGE" to confirm
+
 # Original commands still work and are unchanged
 kpot:personal> read ai/openai       # print the body to stdout
 kpot:personal> copy ai/openai       # → clipboard, auto-clears (30s default)
@@ -150,8 +165,13 @@ line, or the note name after a command that takes one (`note` / `read` /
 | `note <name>` | `<name>` | open `$EDITOR`. Existing → edit; new → seed with template |
 | `read <name>` | `<name>` | print the note body to stdout |
 | `copy <name>` | `<name>` | put body on the clipboard, auto-clear after configured TTL |
-| `find <query>` | free text | case-insensitive substring over name **and** body |
-| `rm [-y] <name>` | flag + name | remove a note (`-y` / `--yes` skips the `[y/N]` prompt) |
+| `find <query>` | free text | case-insensitive substring over name **and** body. v0.10+: numbered output (`cd 1` / `cp 2 pass` after) |
+| `recent` (v0.10+) | – | print the 20 most-recently accessed notes; numbered output, same number space as `find` |
+| `rm [-y] <name\|N>` | flag + name | move a note to trash (reversible). `-y` skips the prompt. Permanent removal: `purge` after `rm` |
+| `trash` (v0.10+) | – | list trash entries (newest first, with relative-time hints) |
+| `restore <trash-name>` (v0.10+) | name | bring a trashed note back under its original name (errors on conflict) |
+| `purge <trash-name>` (v0.10+) | name + flag | permanently delete one trash entry. Confirms unless `-y` |
+| `purge --all` (v0.10+) | – | wipe every trash entry. Requires typing `PURGE` exactly — no flag override |
 | `template` | – | edit the per-vault new-note template in `$EDITOR` |
 | `template show` | – | print the current template + which source (vault / built-in) |
 | `template reset` | – | drop the per-vault template, fall back to the built-in default |

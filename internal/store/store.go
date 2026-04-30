@@ -11,12 +11,33 @@ import (
 	"unicode/utf8"
 )
 
-const StoreVersion = 1
+// StoreVersion bumps:
+//   - v1 (kpot v0.1+): notes + template
+//   - v2 (kpot v0.10+): adds recent[] and trash{}. v1 binaries reject
+//     v2 vaults via the FromJSON `version > StoreVersion` guard.
+const StoreVersion = 2
+
+// ErrNotFound is returned by lookup-style methods (Delete, Trash,
+// Restore, Purge) when the named note / trash entry doesn't exist.
+// Sentinel so callers can errors.Is rather than string-match.
+var ErrNotFound = errors.New("not found")
 
 type Note struct {
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TrashedNote is a note that was removed via `rm` and can be brought
+// back with `restore` until `purge` (or `purge --all`) wipes it. The
+// original creation/update times are preserved so a restore round-trip
+// is byte-identical with the pre-trash Note.
+type TrashedNote struct {
+	OriginalName string    `json:"original_name"`
+	Body         string    `json:"body"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	DeletedAt    time.Time `json:"deleted_at"`
 }
 
 type DecryptedVault struct {
@@ -28,6 +49,15 @@ type DecryptedVault struct {
 	// without this field round-trip cleanly.
 	Template string           `json:"template,omitempty"`
 	Notes    map[string]*Note `json:"notes"`
+	// Recent holds canonical names of recently accessed notes,
+	// most-recent first, capped at RecentMax. Populated by TrackRecent
+	// from REPL cd/show/cp on success. omitempty so v2 vaults that
+	// haven't accumulated history stay byte-equivalent to v1 on disk.
+	Recent []string `json:"recent,omitempty"`
+	// Trash holds soft-deleted notes keyed by `<original-name>.deleted-YYYYMMDD-HHMMSS`.
+	// Populated by Trash, drained by Restore / Purge / PurgeAll. omitempty
+	// so vaults with an empty trash don't carry the field on disk.
+	Trash map[string]*TrashedNote `json:"trash,omitempty"`
 }
 
 func New() *DecryptedVault {
@@ -147,7 +177,7 @@ func (v *DecryptedVault) Delete(name string) error {
 		return err
 	}
 	if _, ok := v.Notes[canon]; !ok {
-		return fmt.Errorf("note %q not found", canon)
+		return fmt.Errorf("note %q: %w", canon, ErrNotFound)
 	}
 	delete(v.Notes, canon)
 	return nil

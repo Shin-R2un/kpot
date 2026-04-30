@@ -105,7 +105,7 @@ func TestRmConfirmYes(t *testing.T) {
 	if _, ok := s.Vault.Get("openai"); ok {
 		t.Fatal("note still exists after rm y")
 	}
-	if !strings.Contains(buf.String(), "removed openai") {
+	if !strings.Contains(buf.String(), "moved to trash: openai.deleted-") {
 		t.Fatalf("rm output = %q", buf.String())
 	}
 }
@@ -324,7 +324,7 @@ func TestRmYesFlagSkipsConfirm(t *testing.T) {
 	if _, ok := s.Vault.Get("openai"); ok {
 		t.Fatal("note still exists after rm -y")
 	}
-	if !strings.Contains(buf.String(), "removed openai") {
+	if !strings.Contains(buf.String(), "moved to trash: openai.deleted-") {
 		t.Fatalf("rm -y output = %q", buf.String())
 	}
 }
