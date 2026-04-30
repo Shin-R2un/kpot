@@ -36,6 +36,13 @@ type Session struct {
 	// their target.
 	currentNote string
 
+	// lastSelection holds the canonical names from the most recent
+	// `find` or `recent` output. `cd N` / `show N` / `cp N field`
+	// resolve N (1-indexed) against this list. Reset by every
+	// find/recent (even when zero matches → cleared). Trash listings
+	// use a separate space and do NOT touch this.
+	lastSelection []string
+
 	out  io.Writer
 	err  io.Writer
 	clip *clipboard.Manager
@@ -304,6 +311,25 @@ func (s *Session) dispatch(cmd string, args []string) (stop bool, err error) {
 		}
 		s.find(strings.Join(args, " "))
 		return false, nil
+	case "recent":
+		if len(args) != 0 {
+			return false, errors.New("usage: recent")
+		}
+		s.recent()
+		return false, nil
+	case "trash":
+		if len(args) != 0 {
+			return false, errors.New("usage: trash")
+		}
+		s.trashList()
+		return false, nil
+	case "restore":
+		if len(args) != 1 {
+			return false, errors.New("usage: restore <trash-name>")
+		}
+		return false, s.restore(args[0])
+	case "purge":
+		return false, s.purge(args)
 	case "copy":
 		// Legacy form: requires an explicit note name. Kept verbatim
 		// so scripts and existing tests keep passing.
@@ -364,19 +390,27 @@ func (s *Session) help() {
 	fmt.Fprintln(s.out, "commands:")
 	fmt.Fprintln(s.out, "  ls              list note names")
 	fmt.Fprintln(s.out, "  note <name>     create or edit a note in $EDITOR")
-	fmt.Fprintln(s.out, "  cd <note>       enter a note context; cd .. or cd / to leave")
+	fmt.Fprintln(s.out, "  cd <note|N>     enter a note context (N = index from last find/recent);")
+	fmt.Fprintln(s.out, "                  cd .. or cd / to leave")
 	fmt.Fprintln(s.out, "  pwd             print the current note context (/ if none)")
-	fmt.Fprintln(s.out, "  show [<arg>]    print body of <arg> (note name) or current note;")
+	fmt.Fprintln(s.out, "  show [<arg>]    print body of <arg> (note name | N) or current note;")
 	fmt.Fprintln(s.out, "                  with no arg + current note set, print current note;")
 	fmt.Fprintln(s.out, "                  with <field> + current note set, print that field")
+	fmt.Fprintln(s.out, "  show <note> <f> print field <f> of <note> without cd'ing")
 	fmt.Fprintln(s.out, "  read <name>     alias of show (kept for backward compatibility)")
 	fmt.Fprintln(s.out, "  fields          list field keys parsed from the current note")
-	fmt.Fprintln(s.out, "  cp [<arg>]      clipboard counterpart of show (current note / field / note)")
+	fmt.Fprintln(s.out, "  cp [<arg>]      clipboard counterpart of show (current note | field | note | N)")
+	fmt.Fprintln(s.out, "  cp <note> <f>   copy field <f> of <note> without cd'ing")
 	fmt.Fprintln(s.out, "  copy <name>     copy a note's body to the clipboard (legacy form)")
 	fmt.Fprintln(s.out, "  set <f> [<v>]   update a field; secret fields force a TTY prompt")
 	fmt.Fprintln(s.out, "  unset <field>   remove a field line from the current note")
-	fmt.Fprintln(s.out, "  find <query>    search note names and bodies (case-insensitive)")
-	fmt.Fprintln(s.out, "  rm [-y] <name>  remove a note (asks for confirmation unless -y)")
+	fmt.Fprintln(s.out, "  find <query>    search note names and bodies (case-insensitive); numbered output")
+	fmt.Fprintln(s.out, "  recent          list recently accessed notes (numbered); pairs with cd <N>")
+	fmt.Fprintln(s.out, "  rm [-y] <name|N>  move a note to trash (reversible via 'restore')")
+	fmt.Fprintln(s.out, "  trash           list trash entries (newest first)")
+	fmt.Fprintln(s.out, "  restore <trash> bring a trashed note back to its original name")
+	fmt.Fprintln(s.out, "  purge <trash>   permanently delete one trash entry")
+	fmt.Fprintln(s.out, "  purge --all     permanently delete every trash entry (requires typing PURGE)")
 	fmt.Fprintln(s.out, "  template        edit the new-note template in $EDITOR")
 	fmt.Fprintln(s.out, "  template show   print the current template")
 	fmt.Fprintln(s.out, "  template reset  restore the built-in default template")
@@ -481,8 +515,14 @@ func (s *Session) note(name string) error {
 	return s.persist()
 }
 
+// rm soft-deletes a note: it's moved into the vault's Trash bin where
+// `restore` can bring it back, or `purge` can permanently remove it.
+// The numeric arg form (`rm 1` after a `find`) is supported for
+// symmetry with cd / show / cp. -y / --yes still skips the prompt
+// but the operation remains reversible — the destructive escape
+// hatch is `purge` after `rm`.
 func (s *Session) rm(name string, autoYes bool) error {
-	canon, err := store.NormalizeName(name)
+	canon, err := s.resolveByNumberOrName(name)
 	if err != nil {
 		return err
 	}
@@ -490,7 +530,7 @@ func (s *Session) rm(name string, autoYes bool) error {
 		return fmt.Errorf("note %q not found. Try 'ls'", canon)
 	}
 	if !autoYes {
-		ok, err := s.confirm(fmt.Sprintf("remove note %q? [y/N]: ", canon))
+		ok, err := s.confirm(fmt.Sprintf("move note %q to trash? [y/N]: ", canon))
 		if err != nil {
 			return err
 		}
@@ -499,13 +539,183 @@ func (s *Session) rm(name string, autoYes bool) error {
 			return nil
 		}
 	}
-	if err := s.Vault.Delete(canon); err != nil {
+	trashKey, err := s.Vault.TrashNote(canon, time.Now())
+	if err != nil {
+		return err
+	}
+	// Clear context if the user trashed the note they were cd'd into
+	// — the alternative (a phantom prompt referencing a vanished note)
+	// is confusing.
+	if s.currentNote == canon {
+		s.currentNote = ""
+	}
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "moved to trash: %s\n", trashKey)
+	fmt.Fprintln(s.out, "  (use 'restore' to bring it back, or 'purge' to delete permanently)")
+	return nil
+}
+
+// trashList prints the trash bin, newest first. Each row carries the
+// trash key (the user passes this back to `restore` or `purge`) plus
+// a relative-time hint. Trash listings deliberately do NOT update
+// lastSelection — the numeric pool is reserved for live notes so
+// `cd 1` after a trash listing doesn't accidentally walk into a
+// dead reference.
+func (s *Session) trashList() {
+	entries := s.Vault.ListTrash()
+	if len(entries) == 0 {
+		fmt.Fprintln(s.out, "(empty)")
+		return
+	}
+	now := time.Now().UTC()
+	width := numberColWidth(len(entries))
+	for i, e := range entries {
+		fmt.Fprintf(s.out, "%*d  %-48s deleted %s\n",
+			width, i+1, e.Key, humanizeAge(now.Sub(e.Note.DeletedAt)))
+	}
+}
+
+// humanizeAge renders a time.Duration in the most useful unit for an
+// "x ago" UI line. Tuned for the trash use case where the youngest
+// entry is seconds old and the oldest is at most weeks (purge --all
+// is the long-term cleanup path).
+func humanizeAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%d d ago", int(d.Hours()/24))
+	default:
+		return fmt.Sprintf("%d wk ago", int(d.Hours()/(24*7)))
+	}
+}
+
+// restore moves a trashed entry back into the live notes under its
+// original name. Conflicts (a live note already at that name) error
+// out without touching either side; the caller can rename the live
+// note and try again.
+func (s *Session) restore(trashName string) error {
+	if err := s.Vault.Restore(trashName); err != nil {
 		return err
 	}
 	if err := s.persist(); err != nil {
 		return err
 	}
-	fmt.Fprintf(s.out, "removed %s\n", canon)
+	// We don't have the original name here without re-reading the
+	// trash entry first — but Restore put the note back under its
+	// original key, so we reconstruct from the trash naming convention.
+	// This is purely cosmetic; the operation already succeeded.
+	original := trashOriginalName(trashName)
+	fmt.Fprintf(s.out, "restored: %s\n", original)
+	return nil
+}
+
+// trashOriginalName extracts the original note name from a trash key
+// (`<name>.deleted-YYYYMMDD-HHMMSS[-N]`). Used for the success message
+// only; the actual restore reads the embedded OriginalName, so a
+// reformat / mismatch here is cosmetic at worst.
+func trashOriginalName(trashName string) string {
+	idx := strings.LastIndex(trashName, ".deleted-")
+	if idx <= 0 {
+		return trashName
+	}
+	return trashName[:idx]
+}
+
+// purge dispatches the trash-cleanup commands:
+//
+//   - `purge <trash-name>` removes one entry permanently. Confirms
+//     unless -y is passed.
+//   - `purge --all` empties the entire trash. Requires the user to
+//     literally type "PURGE" — a single y/N is too easy to misfire
+//     when wiping everything.
+//
+// Args are parsed manually rather than via parseYesFlag because
+// --all is a purge-only flag that doesn't belong in the global flag
+// list (a `rm --all` would be terrifying).
+func (s *Session) purge(args []string) error {
+	var (
+		yes    bool
+		all    bool
+		target string
+	)
+	for _, a := range args {
+		switch a {
+		case "-y", "--yes":
+			yes = true
+		case "--all":
+			all = true
+		default:
+			if strings.HasPrefix(a, "-") {
+				return fmt.Errorf("unknown flag: %s", a)
+			}
+			if target != "" {
+				return errors.New("usage: purge <trash-name> | purge --all")
+			}
+			target = a
+		}
+	}
+	if all {
+		if target != "" {
+			return errors.New("purge --all takes no positional argument")
+		}
+		return s.purgeAll()
+	}
+	if target == "" {
+		return errors.New("usage: purge <trash-name> | purge --all")
+	}
+	if !yes {
+		ok, err := s.confirm(fmt.Sprintf("permanently delete %q? [y/N]: ", target))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(s.out, "cancelled")
+			return nil
+		}
+	}
+	if err := s.Vault.Purge(target); err != nil {
+		return err
+	}
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "purged: %s\n", target)
+	return nil
+}
+
+// purgeAll wipes every trash entry. Single y/N is insufficient — a
+// busy user could mash y at the wrong prompt and lose all reversible
+// deletions in one go. We require typing "PURGE" verbatim.
+func (s *Session) purgeAll() error {
+	count := len(s.Vault.Trash)
+	if count == 0 {
+		fmt.Fprintln(s.out, "(trash is empty)")
+		return nil
+	}
+	line, err := s.p.Prompt(fmt.Sprintf("Type 'PURGE' to permanently delete all %d trash entries: ", count))
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, errAbort) {
+			fmt.Fprintln(s.out, "cancelled")
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(line) != "PURGE" {
+		fmt.Fprintln(s.out, "cancelled (must type 'PURGE' exactly)")
+		return nil
+	}
+	n := s.Vault.PurgeAll()
+	if err := s.persist(); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "purged %d entries\n", n)
 	return nil
 }
 
@@ -532,16 +742,54 @@ func (s *Session) find(query string) {
 	matches := s.Vault.Find(query)
 	if len(matches) == 0 {
 		fmt.Fprintln(s.out, "(no matches)")
+		s.setSelection(nil)
 		return
 	}
-	for _, m := range matches {
+	names := make([]string, 0, len(matches))
+	width := numberColWidth(len(matches))
+	for i, m := range matches {
 		tag := tagFor(m)
 		if m.Snippet != "" {
-			fmt.Fprintf(s.out, "%-32s %s  %s\n", m.Name, tag, m.Snippet)
+			fmt.Fprintf(s.out, "%*d  %-32s %s  %s\n", width, i+1, m.Name, tag, m.Snippet)
 		} else {
-			fmt.Fprintf(s.out, "%-32s %s\n", m.Name, tag)
+			fmt.Fprintf(s.out, "%*d  %-32s %s\n", width, i+1, m.Name, tag)
 		}
+		names = append(names, m.Name)
 	}
+	s.setSelection(names)
+}
+
+// numberColWidth returns how many digits a 1-indexed list of n entries
+// requires. n=9 → 1, n=10 → 2, n=100 → 3. Used so both find and recent
+// output align cleanly when result counts vary.
+func numberColWidth(n int) int {
+	if n < 10 {
+		return 1
+	}
+	if n < 100 {
+		return 2
+	}
+	if n < 1000 {
+		return 3
+	}
+	return 4
+}
+
+// recent prints the recent-access list (most recent first) and sets it
+// as the active numeric selection so `cd 1`, `show 1`, `cp 1 pass`
+// pick it up the same way they would after `find`.
+func (s *Session) recent() {
+	names := s.Vault.ListRecent()
+	if len(names) == 0 {
+		fmt.Fprintln(s.out, "(empty)")
+		s.setSelection(nil)
+		return
+	}
+	width := numberColWidth(len(names))
+	for i, n := range names {
+		fmt.Fprintf(s.out, "%*d  %s\n", width, i+1, n)
+	}
+	s.setSelection(names)
 }
 
 func tagFor(m store.Match) string {
@@ -584,25 +832,30 @@ func (s *Session) announceClipboard(what string) {
 // cd navigates the REPL into a note context. Resolution order:
 //
 //  1. ".." or "/" — clear context, return to root.
-//  2. exact note-name match — set s.currentNote.
-//  3. prefix-group match (any note starts with target+"/") — print
+//  2. positive integer N — pick lastSelection[N-1] (set by the most
+//     recent find / recent). Numeric wins over a literal note named
+//     "1" — see resolveByNumberOrName.
+//  3. exact note-name match — set s.currentNote.
+//  4. prefix-group match (any note starts with target+"/") — print
 //     the candidates and leave context unchanged.
-//  4. neither — error.
+//  5. neither — error.
 //
-// MVP: ".." goes straight to root rather than walking up one
-// directory level. The spec accepts this.
+// On successful context entry the note is appended to Recent and the
+// vault is persisted. MVP: ".." goes straight to root rather than
+// walking up one directory level.
 func (s *Session) cd(target string) error {
 	if target == ".." || target == "/" {
 		s.currentNote = ""
 		return nil
 	}
-	canon, err := store.NormalizeName(target)
+	canon, err := s.resolveByNumberOrName(target)
 	if err != nil {
 		return err
 	}
 	if _, ok := s.Vault.Get(canon); ok {
 		s.currentNote = canon
-		return nil
+		s.Vault.TrackRecent(canon)
+		return s.persist()
 	}
 	matches := s.prefixMatches(canon)
 	if len(matches) > 0 {
@@ -674,15 +927,20 @@ func (s *Session) show(args []string) error {
 		fmt.Fprintln(s.out, n.Body)
 		return nil
 	case 1:
-		canon, err := store.NormalizeName(args[0])
-		// If NormalizeName rejects (e.g. "url" with weird chars),
-		// fall through to field-name handling without surfacing the
-		// store-layer error — the user clearly didn't mean a name.
+		canon, err := s.resolveByNumberOrName(args[0])
+		// If the arg can't be a name (numeric out-of-range / NormalizeName
+		// reject for chars), fall through to field-name handling without
+		// surfacing the resolver error — the user might have meant a field.
+		// Numeric out-of-range is the one case where we DO want the error
+		// surfaced, since the user explicitly typed a number.
 		if err == nil {
 			if n, ok := s.Vault.Get(canon); ok {
 				fmt.Fprintln(s.out, n.Body)
-				return nil
+				s.Vault.TrackRecent(canon)
+				return s.persist()
 			}
+		} else if errors.Is(err, errSelectionEmpty) || errors.Is(err, errSelectionOutOfRange) {
+			return err
 		}
 		// Treat as field name on the current note.
 		if s.currentNote == "" {
@@ -699,8 +957,27 @@ func (s *Session) show(args []string) error {
 		}
 		fmt.Fprintln(s.out, val)
 		return nil
+	case 2:
+		// `show <note|N> <field>` — print the named field of the
+		// resolved note. Useful after `find`: `show 1 url` without
+		// having to cd first.
+		canon, err := s.resolveByNumberOrName(args[0])
+		if err != nil {
+			return err
+		}
+		n, ok := s.Vault.Get(canon)
+		if !ok {
+			return fmt.Errorf("note %q not found. Try 'ls'", canon)
+		}
+		val, ok := fields.Get(n.Body, args[1])
+		if !ok {
+			return fmt.Errorf("field %q not found in %s", args[1], canon)
+		}
+		fmt.Fprintln(s.out, val)
+		s.Vault.TrackRecent(canon)
+		return s.persist()
 	default:
-		return errors.New("usage: show [<note>|<field>]")
+		return errors.New("usage: show [<note>|<field>] | show <note> <field>")
 	}
 }
 
@@ -747,15 +1024,18 @@ func (s *Session) cp(args []string) error {
 		s.announceClipboard(fmt.Sprintf("copied %s", s.currentNote))
 		return nil
 	case 1:
-		canon, err := store.NormalizeName(args[0])
+		canon, err := s.resolveByNumberOrName(args[0])
 		if err == nil {
 			if n, ok := s.Vault.Get(canon); ok {
 				if err := s.clip.Copy([]byte(n.Body)); err != nil {
 					return fmt.Errorf("clipboard: %w", err)
 				}
 				s.announceClipboard(fmt.Sprintf("copied %s", canon))
-				return nil
+				s.Vault.TrackRecent(canon)
+				return s.persist()
 			}
+		} else if errors.Is(err, errSelectionEmpty) || errors.Is(err, errSelectionOutOfRange) {
+			return err
 		}
 		if s.currentNote == "" {
 			return fmt.Errorf("note %q not found. Try 'ls'", args[0])
@@ -774,8 +1054,30 @@ func (s *Session) cp(args []string) error {
 		}
 		s.announceClipboard(fmt.Sprintf("copied field %q from %s", args[0], s.currentNote))
 		return nil
+	case 2:
+		// `cp <note|N> <field>` — copy the named field of the
+		// resolved note without cd'ing first. Pairs with `find`:
+		// `find pass` → `cp 1 pass`.
+		canon, err := s.resolveByNumberOrName(args[0])
+		if err != nil {
+			return err
+		}
+		n, ok := s.Vault.Get(canon)
+		if !ok {
+			return fmt.Errorf("note %q not found. Try 'ls'", canon)
+		}
+		val, ok := fields.Get(n.Body, args[1])
+		if !ok {
+			return fmt.Errorf("field %q not found in %s", args[1], canon)
+		}
+		if err := s.clip.Copy([]byte(val)); err != nil {
+			return fmt.Errorf("clipboard: %w", err)
+		}
+		s.announceClipboard(fmt.Sprintf("copied field %q from %s", args[1], canon))
+		s.Vault.TrackRecent(canon)
+		return s.persist()
 	default:
-		return errors.New("usage: cp [<note>|<field>]")
+		return errors.New("usage: cp [<note>|<field>] | cp <note> <field>")
 	}
 }
 
@@ -1063,6 +1365,14 @@ func (s *Session) importVault(args []string) error {
 		if in.Template != "" {
 			s.Vault.Template = in.Template
 		}
+		// "replace ALL" must take Recent and Trash with it. Otherwise a
+		// trashed note from the *prior* vault — typically the secret
+		// that prompted the replace — silently lingers in the payload
+		// and pops back via `restore`. We adopt the import side's
+		// values (which are usually empty for a freshly-exported JSON,
+		// but we copy them through to be faithful to the source).
+		s.Vault.Recent = in.Recent
+		s.Vault.Trash = in.Trash
 		fmt.Fprintf(s.out, "replaced: %d notes\n", len(in.Notes))
 	case "merge":
 		added, conflicts := mergeNotes(s.Vault, in)

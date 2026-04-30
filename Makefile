@@ -1,4 +1,4 @@
-.PHONY: build test install clean help check vet fmt fmt-check \
+.PHONY: build test install clean help check vet fmt fmt-check bench \
         release-patch release-minor release-major \
         install-hooks uninstall-hooks
 
@@ -40,6 +40,14 @@ fmt-check:
 		fi
 
 check: vet fmt-check test
+
+# `make bench` runs every Benchmark in the tree without the regular
+# tests (-run=^$). benchtime is short so it fits a normal dev cycle;
+# bump it explicitly for release-time baseline captures, e.g.:
+#   go test ./... -run=^$ -bench=. -benchtime=3s -benchmem
+# Baseline numbers (and the rationale for them) live in docs/perf.md.
+bench:
+	go test ./... -run=^$$ -bench=. -benchmem -count=1
 
 # --- Release automation ---
 # `make release-patch`  v0.6.0 -> v0.6.1
@@ -89,6 +97,7 @@ help:
 	@echo "    fmt             gofmt -w .   (auto-format)"
 	@echo "    fmt-check       gofmt -l .   (check only, no rewrite)"
 	@echo "    check           vet + fmt-check + test"
+	@echo "    bench           run all benchmarks (no regular tests)"
 	@echo ""
 	@echo "  Release (auto-bumps version, tags, pushes; triggers GitHub Actions):"
 	@echo "    release-patch   v0.6.0 -> v0.6.1"

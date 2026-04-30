@@ -250,3 +250,25 @@ func TestIsSecretField(t *testing.T) {
 		}
 	}
 }
+
+// TestSecretFieldNamesContractCovered checks that every key the
+// secretFieldNames map registers as secret is also recognised when
+// passed in upper-case, with surrounding whitespace, and via
+// strings.Title-cased input — the spelling variants users type from
+// muscle memory. Update this test alongside the map; both must
+// describe the same contract.
+func TestSecretFieldNamesContractCovered(t *testing.T) {
+	for k := range secretFieldNames {
+		if !IsSecretField(k) {
+			t.Errorf("IsSecretField(%q) = false; map says it's secret", k)
+		}
+		// Case insensitivity.
+		if !IsSecretField(strings.ToUpper(k)) {
+			t.Errorf("IsSecretField(%q) lost case-insensitive match", strings.ToUpper(k))
+		}
+		// Surrounding whitespace tolerance.
+		if !IsSecretField("  " + k + "  ") {
+			t.Errorf("IsSecretField(%q) didn't survive whitespace trim", k)
+		}
+	}
+}

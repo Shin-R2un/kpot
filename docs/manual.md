@@ -394,24 +394,106 @@ removed field "old_field"
 
 ---
 
-#### `find <query>`
-ノート名・本文を大文字小文字を区別せずに検索します。
+#### `find <query>` (v0.10+ で番号付き)
+ノート名・本文を大文字小文字を区別せずに検索します。v0.10 から結果に
+番号が付き、直後に `cd <N>` / `show <N>` / `cp <N> <field>` で
+参照できます。
 
 ```
-kpot:personal> find api
-ai/openai   (body)  OPENAI_API_KEY=sk-...
+kpot:personal> find github
+1  accounts/github-main      (name)
+2  dev/github-pat            (body)  token: ghp_xxx
+kpot:personal> cd 1
+kpot:personal/accounts/github-main> cp pass
+copied field "pass" from accounts/github-main
+```
+
+番号空間は `find` と `recent` で共有されます。新しい `find` を実行すると
+前の選択は置き換えられます。`ls` / `pwd` / `fields` / `trash` などは
+触りません。
+
+literal note 名 `1` が存在 + 直前の selection あり → numeric が優先されます
+(find 結果の 1 件目)。回避手段は将来検討です。
+
+---
+
+#### `recent` (v0.10+)
+最近アクセスした note (cd / show / cp で触ったもの) を新しい順に
+最大 20 件表示し、`cd <N>` / `show <N>` / `cp <N> ...` の番号空間に
+セットします。
+
+```
+kpot:personal> recent
+1  accounts/github-main
+2  ai/openai
+3  server/fw0
+kpot:personal> cd 2
+```
+
+履歴は vault payload 内に暗号化して保存されます。外部ファイルには出ません。
+
+---
+
+#### `rm [-y] <name|N>` (v0.10+ で trash 化)
+ノートを **trash に移動** します (物理削除ではなくなりました)。`restore`
+で取り戻せます。`-y` は確認 prompt をスキップしますが、操作はあくまで
+可逆です。永久削除したい場合は `rm` → `purge` の 2 ステップ。
+
+```
+kpot:personal> rm ai/openai
+move note "ai/openai" to trash? [y/N]: y
+moved to trash: ai/openai.deleted-20260501-153012
+  (use 'restore' to bring it back, or 'purge' to delete permanently)
+```
+
+`find` の結果から数字でも消せます (`rm 1`)。
+
+---
+
+#### `trash` (v0.10+)
+trash の中身を新しい順に表示します。
+
+```
+kpot:personal> trash
+1  ai/openai.deleted-20260501-153012     deleted just now
+2  old/service.deleted-20260430-091122    deleted 1 d ago
+```
+
+**注**: trash 表示の番号は `cd` / `show` / `cp` の selection には
+入りません (`restore` / `purge` は trash key で指定するため、混在を避ける
+設計)。
+
+---
+
+#### `restore <trash-name>` (v0.10+)
+trash から元の名前へ戻します。元名に live note が新しくできていれば
+エラーになり、trash も live もそのまま (上書きしません)。
+
+```
+kpot:personal> restore ai/openai.deleted-20260501-153012
+restored: ai/openai
 ```
 
 ---
 
-#### `rm [-y] <name>`
-ノートを削除します。`-y` で確認をスキップします。
+#### `purge <trash-name>` / `purge --all` (v0.10+)
+trash の永久削除。1 エントリだけ消す形と全消しの形があります。
 
 ```
-kpot:personal> rm ai/openai
-remove ai/openai? [y/N]: y
-removed ai/openai
+# 単一削除 (確認あり)
+kpot:personal> purge ai/openai.deleted-20260501-153012
+permanently delete "ai/openai.deleted-20260501-153012"? [y/N]: y
+purged: ai/openai.deleted-20260501-153012
+
+# 全削除 (PURGE と打たないと動かない)
+kpot:personal> purge --all
+Type 'PURGE' to permanently delete all 12 trash entries: PURGE
+purged 12 entries
 ```
+
+`-y` で 1 件 purge の確認はスキップできますが、`purge --all` の
+"PURGE" 入力は **どんな flag でもスキップ不可** です (誤操作で全消失する
+リスクが高すぎるため)。
 
 ---
 

@@ -99,6 +99,48 @@ func TestRoundTripJSON(t *testing.T) {
 	}
 }
 
+// TestToJSONStampsCurrentVersion guards the v1 → v2 auto-upgrade
+// contract: any save by a v0.10+ binary writes payload version=2,
+// regardless of the version the vault was loaded under. Without this,
+// a v1 vault round-tripped through v0.10 would still claim version=1,
+// and a downgraded v0.9 binary would happily open it — drop the new
+// recent/trash fields silently — and ship secrets out of restorability.
+func TestToJSONStampsCurrentVersion(t *testing.T) {
+	// Synthesize a vault that *was* a v1 (version=1, no recent/trash).
+	v := New()
+	v.Version = 1
+	v.Put("a", "x")
+
+	b, err := v.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Version != StoreVersion {
+		t.Errorf("in-memory Version = %d, want %d after ToJSON", v.Version, StoreVersion)
+	}
+
+	// Re-load and confirm the persisted payload reads back at the
+	// current version, not the load-time version.
+	v2, err := FromJSON(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2.Version != StoreVersion {
+		t.Errorf("decoded Version = %d, want %d", v2.Version, StoreVersion)
+	}
+}
+
+// TestFromJSONRejectsNewerVersion locks the symmetric guard: a
+// hypothetical v3 vault is rejected by this binary so a future
+// breaking format change can't be silently downgraded.
+func TestFromJSONRejectsNewerVersion(t *testing.T) {
+	payload := []byte(`{"version":99,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","notes":{}}`)
+	_, err := FromJSON(payload)
+	if err == nil {
+		t.Fatal("FromJSON accepted version=99, expected version-mismatch error")
+	}
+}
+
 func TestNamesSorted(t *testing.T) {
 	v := New()
 	v.Put("zebra", "z")
