@@ -1,14 +1,16 @@
 # kpot ユーザーマニュアル
 
-> **バージョン**: 0.8.0  
-> **最終更新**: 2026-04-29  
+> **バージョン**: 0.10.0  
+> **最終更新**: 2026-05-01  
 > **リポジトリ**: https://github.com/Shin-R2un/kpot
 >
-> v0.5.0 → v0.8.0 の追加点:
+> v0.5.0 → v0.10.0 の追加点:
 > - **v0.6**: REPL コンテキスト UX (`cd` / `show` / `fields` / `cp` / `set` / `unset`)
 > - **v0.6.1**: ノート名で Unicode 対応 (日本語 / キリル / ギリシャ等)
 > - **v0.7**: `vault_dir` + `default_vault` でベアネーム解決と既定 vault
 > - **v0.8**: `kpot config init/show/path` サブコマンド
+> - **v0.9**: `kpot serve` モバイル WebUI (read-only)
+> - **v0.10**: `find` 番号付き / `recent` / `trash` / `restore` / `purge` / benchmark
 
 ---
 
